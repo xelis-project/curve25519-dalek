@@ -245,10 +245,10 @@ fn make_point_iterator<const L1: usize>(
 
     let thread_iter = batch_iterator.skip(thread_i).step_by(n_threads);
 
-    let els_per_batch = 1 << (L2 + L1);
+    let els_per_batch: u64 = 1u64 << (L2 + L1);
 
     // starting point for this thread
-    let t_normalized = &normalized - &i64_to_scalar((thread_i * els_per_batch) as i64) * G;
+    let t_normalized = &normalized - &i64_to_scalar((thread_i as u64 * els_per_batch) as i64) * G;
 
     let mut target_montgomery = AffineMontgomeryPoint::from(&t_normalized.0);
     let batch_step = -(n_threads as i64) * els_per_batch as i64;
