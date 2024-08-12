@@ -228,7 +228,7 @@ pub mod table_generation {
         let j_max = 1 << (l1 - 1);
         let cuckoo_len = (j_max as u64 * 30 / 100) as usize + j_max;
 
-        let mut all_entries = vec![Default::default(); j_max + 1];
+        let mut all_entries = Vec::with_capacity(j_max + 1);
 
         let acc = RistrettoPoint::identity().0;
         let step = RISTRETTO_BASEPOINT_POINT.0.mul_by_cofactor(); // table is based on number*cofactor
@@ -245,7 +245,7 @@ pub mod table_generation {
                 }
             }
 
-            all_entries[i] = point.u.as_bytes();
+            all_entries.push(point.u.as_bytes());
             acc = acc.addition_not_ct(&step);
         }
 
