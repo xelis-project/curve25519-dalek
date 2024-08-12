@@ -146,13 +146,29 @@ impl<const L1: usize> ECDLPTables<L1> {
         (size, n)
     }
 
-    /// Create a new empty tables.
-    pub fn new() -> Self {
+    /// Create a new empty precomputed tables.
+    pub fn empty() -> Self {
         let (size, n) = Self::get_required_sizes();
         Self {
             bytes: vec![Default::default(); n],
             size,
         }
+    }
+
+    /// Generate a new precomputed tables
+    pub fn generate() -> std::io::Result<Self> {
+        let mut zelf = Self::empty();
+        table_generation::create_table_file(L1, zelf.as_mut_slice())?;
+
+        Ok(zelf)
+    }
+
+    /// Generate a new precomputed tables with a progress report function.
+    pub fn generate_with_progress_report<P: ProgressTableGenerationReportFunction>(p: P) -> std::io::Result<Self> {
+        let mut zelf = Self::empty();
+        table_generation::create_table_file_with_progress_report(L1, zelf.as_mut_slice(), p)?;
+
+        Ok(zelf)
     }
 
     /// Load the tables from a file.
@@ -418,7 +434,8 @@ pub fn par_decode<const L1: usize, R: ProgressReportFunction + Sync>(
 
         let mut res = None;
         for el in handles {
-            res = res.or(el.join().expect("child thread panicked"));
+            let v = el.join().expect("child thread panicked");
+            res = res.or(v);
         }
 
         res
@@ -562,17 +579,12 @@ fn i64_to_scalar(n: i64) -> Scalar {
 mod tests {
     use super::*;
     use rand::Rng;
-    use table_generation::create_table_file;
 
     const L1: usize = 26;
 
     #[test]
     fn gen_t1_t2() {
-        let mut tables = ECDLPTables::<L1>::new();
-        let slice = tables.as_mut_slice();
-
-        create_table_file(L1, slice).unwrap();
-
+        let tables = ECDLPTables::<L1>::generate().unwrap();
         tables.write_to_file("ecdlp_table.bin").unwrap();
     }
 
@@ -623,5 +635,17 @@ mod tests {
 
             println!("tested {num}");
         }
+    }
+
+    #[test]
+    fn test_ecdlp_par_decode() {
+        let value: u64 = 1<<48;
+
+        let tables = ECDLPTables::<L1>::load_from_file("ecdlp_table.bin").unwrap();
+        let view = tables.view();
+
+        let point = RistrettoPoint::mul_base(&Scalar::from(value));
+        let res = par_decode(&view, point, ECDLPArguments::new_with_range(0, 1 << 48).n_threads(1).pseudo_constant_time(true));
+        assert_eq!(res, Some(value as i64));
     }
 }
