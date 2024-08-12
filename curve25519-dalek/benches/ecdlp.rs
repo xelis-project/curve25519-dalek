@@ -2,26 +2,24 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use curve25519_dalek::{
     constants::RISTRETTO_BASEPOINT_POINT as G,
     ecdlp::{
-        self, CuckooT1HashMapView, ECDLPArguments, ECDLPTablesFile, PrecomputedECDLPTables,
-        T2LinearTableView, T2MontgomeryCoordinates,
+        self,
+        ECDLPArguments,
+        ECDLPTables
     },
     Scalar,
 };
-use memmap::{Mmap, MmapOptions};
 use rand::Rng;
-use std::{fs::File, io::Read};
 
 pub fn ecdlp_bench(c: &mut Criterion) {
-    let ecdlp_table_file = File::open("ecdlp_table_26.bin").unwrap();
-    let bytes = unsafe { memmap::MmapOptions::new().map(&ecdlp_table_file).unwrap() };
-    let tables = ECDLPTablesFileView::<'_, 26>::from_bytes(&bytes);
+    let tables = ECDLPTables::<26>::load_from_file("ecdlp_table.bin").unwrap();
+    let view = tables.view();
 
     c.bench_function("fast ecdlp", |b| {
         let num = rand::thread_rng().gen_range(0u64..(1 << 48));
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::decode(
-                &tables,
+                &view,
                 black_box(point),
                 ECDLPArguments::new_with_range(0, 1 << 48).pseudo_constant_time(true),
             );
@@ -34,7 +32,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::par_decode(
-                &tables,
+                &view,
                 black_box(point),
                 ECDLPArguments::new_with_range(0, 1 << 48)
                     .pseudo_constant_time(true)
@@ -49,7 +47,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::par_decode(
-                &tables,
+                &view,
                 black_box(point),
                 ECDLPArguments::new_with_range(0, 1 << 48)
                     .pseudo_constant_time(true)
@@ -64,7 +62,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::par_decode(
-                &tables,
+                &view,
                 black_box(point),
                 ECDLPArguments::new_with_range(0, 1 << 48)
                     .pseudo_constant_time(true)
@@ -79,7 +77,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::par_decode(
-                &tables,
+                &view,
                 black_box(point),
                 ECDLPArguments::new_with_range(0, 1 << 48)
                     .pseudo_constant_time(true)
@@ -94,7 +92,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::decode(
-                &tables,
+                &view,
                 black_box(point),
                 ECDLPArguments::new_with_range(0, 1 << 48),
             );
@@ -107,7 +105,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::decode(
-                &tables,
+                &view,
                 black_box(point),
                 ECDLPArguments::new_with_range(0, 1 << 48),
             );
@@ -120,7 +118,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::par_decode(
-                &tables,
+                &view,
                 black_box(point),
                 ECDLPArguments::new_with_range(0, 1 << 48).n_threads(1),
             );
@@ -133,7 +131,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::decode(
-                &tables,
+                &view,
                 black_box(point),
                 ECDLPArguments::new_with_range(0, 1 << 48),
             );
@@ -146,7 +144,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::decode(
-                &tables,
+                &view,
                 black_box(point),
                 ECDLPArguments::new_with_range(0, 1 << 48),
             );
@@ -159,7 +157,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::decode(
-                &tables,
+                &view,
                 black_box(point),
                 ECDLPArguments::new_with_range(0, 1 << 48),
             );
@@ -172,7 +170,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::decode(
-                &tables,
+                &view,
                 black_box(point),
                 ECDLPArguments::new_with_range(0, 1 << 48),
             );

@@ -30,7 +30,7 @@ pub struct ECDLPTablesFileView<'a, const L1: usize> {
 impl<'a, const L1: usize> ECDLPTablesFileView<'a, L1> {
     const J_BITS: usize = L1 - 1;
     const J_MAX: usize = 1 << Self::J_BITS;
-    const CUCKOO_LEN: usize = (Self::J_MAX as f64 * 1.3) as _;
+    const CUCKOO_LEN: usize = (Self::J_MAX as u64 * 30 / 100) as usize + Self::J_MAX;
 
     /// ECDLP algorithm may panic if the alignment or size of `bytes` is wrong.
     pub fn from_bytes(bytes: &'a [u8]) -> Self {
@@ -226,7 +226,7 @@ pub mod table_generation {
 
     fn create_t1_table<P: ProgressTableGenerationReportFunction>(l1: usize, dest: &mut [u8], progress_report: &P) -> std::io::Result<()> {
         let j_max = 1 << (l1 - 1);
-        let cuckoo_len = (j_max as f64 * 1.3) as usize;
+        let cuckoo_len = (j_max as u64 * 30 / 100) as usize + j_max;
 
         let mut all_entries = vec![Default::default(); j_max + 1];
 
@@ -249,25 +249,18 @@ pub mod table_generation {
             acc = acc.addition_not_ct(&step);
         }
 
-        // We don't directly write to `dest` as our writes will be very random-access-y and `dest` is probably an mmaped file.
-        let mut t1_keys = vec![0u32; cuckoo_len];
-        let mut t1_values = vec![0u32; cuckoo_len];
+        let (t1_keys_dest, t1_values_dest) = dest.split_at_mut(cuckoo_len * size_of::<u32>());
+        let t1_keys_dest: &mut [u32] = bytemuck::cast_slice_mut(t1_keys_dest);
+        let t1_values_dest: &mut [u32] = bytemuck::cast_slice_mut(t1_values_dest);
 
         t1_cuckoo_setup(
             cuckoo_len,
             j_max,
             &all_entries,
-            &mut t1_values,
-            &mut t1_keys,
+            t1_values_dest,
+            t1_keys_dest,
             progress_report,
         )?;
-
-        let (t1_keys_dest, t1_values_dest) = dest.split_at_mut(cuckoo_len * size_of::<u32>());
-        let t1_keys_dest: &mut [u32] = bytemuck::cast_slice_mut(t1_keys_dest);
-        let t1_values_dest: &mut [u32] = bytemuck::cast_slice_mut(t1_values_dest);
-
-        t1_keys_dest.copy_from_slice(&t1_keys);
-        t1_values_dest.copy_from_slice(&t1_values);
 
         Ok(())
     }
@@ -293,9 +286,10 @@ pub mod table_generation {
     }
 
     /// Length of the table file for a given `l1` const.
-    pub fn table_file_len(l1: usize) -> usize {
-        let j_max = 1 << (l1 - 1);
-        let cuckoo_len = (j_max as f64 * 1.3) as usize;
+    pub const fn table_file_len(l1: usize) -> usize {
+        let j_max: u64 = 1 << (l1 - 1);
+        // x1.3 is the load factor of the cuckoo hashmap.
+        let cuckoo_len = ((j_max * 30 / 100) + j_max) as usize;
 
         I_MAX * size_of::<T2MontgomeryCoordinates>() + (cuckoo_len * 2) * size_of::<u32>()
     }

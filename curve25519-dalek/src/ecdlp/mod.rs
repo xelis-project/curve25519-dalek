@@ -93,7 +93,7 @@ use crate::{
 use affine_montgomery::AffineMontgomeryPoint;
 use core::{
     ops::ControlFlow,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicBool, Ordering}
 };
 
 pub use table::{table_generation, ECDLPTablesFileView, ProgressTableGenerationReportFunction, NoOpProgressTableGenerationReportFunction, ReportStep};
@@ -118,6 +118,78 @@ impl ProgressReportFunction for NoopReportFn {
     #[inline(always)]
     fn report(&self, _progress: f64) -> ControlFlow<()> {
         ControlFlow::Continue(())
+    }
+}
+
+/// A struct to ensure that the bytes are aligned on 32 bytes.
+/// This is required for the table generation.
+#[derive(Default, bytemuck::Pod, bytemuck::Zeroable, Copy, Clone)]
+#[repr(C, align(32))]
+struct ForcedAlign32([u8; 32]);
+
+/// The tables file is a big array of ForcedAlign32, which is a 32-byte aligned array of bytes.
+/// Some bytes may be used as padding only.
+/// This prevent using memory-mapped files, as the alignment is not guaranteed.
+pub struct ECDLPTables<const L1: usize> {
+    bytes: Vec<ForcedAlign32>,
+    size: usize,
+}
+
+impl<const L1: usize> ECDLPTables<L1> {
+    /// Get the expected final bytes size and number of vec elements in the tables.
+    fn get_required_sizes() -> (usize, usize) {
+        let size = table_generation::table_file_len(L1);
+        let mut n = size / 32;
+        if size % 32 != 0 {
+            n += 1;
+        }
+        (size, n)
+    }
+
+    /// Create a new empty tables.
+    pub fn new() -> Self {
+        let (size, n) = Self::get_required_sizes();
+        Self {
+            bytes: vec![Default::default(); n],
+            size,
+        }
+    }
+
+    /// Load the tables from a file.
+    #[cfg(feature = "std")]
+    pub fn load_from_file(path: &str) -> std::io::Result<Self> {
+        use std::io::Read;
+
+        let mut file = std::fs::File::open(path)?;
+        let (size, n) = Self::get_required_sizes();
+        let mut bytes = vec![Default::default(); n];
+        file.read_exact(bytemuck::cast_slice_mut(&mut bytes))?;
+        Ok(Self { bytes, size })
+    }
+
+    /// Write the tables to a file.
+    #[cfg(feature = "std")]
+    pub fn write_to_file(&self, path: &str) -> std::io::Result<()> {
+        use std::io::Write;
+
+        let mut file = std::fs::File::create(path)?;
+        file.write_all(bytemuck::cast_slice(&self.bytes))?;
+        Ok(())
+    }
+
+    /// Get the tables as a slice of bytes.
+    pub fn as_slice(&self) -> &[u8] {
+        &bytemuck::cast_slice(&self.bytes)[..self.size]
+    }
+
+    /// Get the tables a mutable slice of bytes.
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        &mut bytemuck::cast_slice_mut(&mut self.bytes)[..self.size]
+    }
+
+    /// Get a view of the tables.
+    pub fn view(&self) -> ECDLPTablesFileView<'_, L1> {
+        ECDLPTablesFileView::from_bytes(self.as_slice())
     }
 }
 
@@ -490,33 +562,27 @@ fn i64_to_scalar(n: i64) -> Scalar {
 mod tests {
     use super::*;
     use rand::Rng;
-    use std::fs::{File, OpenOptions};
+    use table_generation::create_table_file;
+
+    const L1: usize = 26;
 
     #[test]
     fn gen_t1_t2() {
-        let l1 = 26;
-        let path = format!("ecdlp_table_{l1}.bin");
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(path)
-            .unwrap();
+        let mut tables = ECDLPTables::<L1>::new();
+        let slice = tables.as_mut_slice();
 
-        file.set_len(table_generation::table_file_len(l1) as _)
-            .unwrap();
-        let mut mapped = unsafe { memmap::MmapOptions::new().map_mut(&file).unwrap() };
-        table_generation::create_table_file(l1, &mut mapped).unwrap();
+        create_table_file(L1, slice).unwrap();
+
+        tables.write_to_file("ecdlp_table.bin").unwrap();
     }
 
     #[test]
-    fn test_ecdlp_26_cofactors() {
-        let ecdlp_table_file = File::open("ecdlp_table_26.bin").unwrap();
-        let bytes = unsafe { memmap::MmapOptions::new().map(&ecdlp_table_file).unwrap() };
-        let tables = ECDLPTablesFileView::<'_, 26>::from_bytes(&bytes);
+    fn test_ecdlp_cofactors() {
+        let tables = ECDLPTables::<L1>::load_from_file("ecdlp_table.bin").unwrap();
+        let view = tables.view();
 
-        for i in (0..(1u64 << 48)).step_by(1 << 26).take(1 << 12) {
-            let delta = rand::thread_rng().gen_range(0..(1 << 26));
+        for i in (0..(1u64 << 48)).step_by(1 << L1).take(1 << 12) {
+            let delta = rand::thread_rng().gen_range(0..(1 << L1));
 
             let num = i as u64 + delta;
             let point = RistrettoPoint::mul_base(&Scalar::from(num));
@@ -527,7 +593,7 @@ mod tests {
             // let point = point.compress().decompress().unwrap();
 
             let res = decode(
-                &tables,
+                &view,
                 RistrettoPoint(point),
                 ECDLPArguments::new_with_range(0, 1 << 48),
             );
@@ -538,12 +604,11 @@ mod tests {
     }
 
     #[test]
-    fn test_ecdlp_26() {
-        let ecdlp_table_file = File::open("ecdlp_table_26.bin").unwrap();
-        let bytes = unsafe { memmap::MmapOptions::new().map(&ecdlp_table_file).unwrap() };
-        let tables = ECDLPTablesFileView::<'_, 26>::from_bytes(&bytes);
+    fn test_ecdlp() {
+        let tables = ECDLPTables::<L1>::load_from_file("ecdlp_table.bin").unwrap();
+        let view = tables.view();
 
-        for i in (0..(1u64 << 48)).step_by(1 << 26).take(1 << 12) {
+        for i in (0..(1u64 << 48)).step_by(1 << L1).take(1 << 12) {
             let num = i as u64; // rand::thread_rng().gen_range(0u64..(1 << 48));
             let mut point = RistrettoPoint::mul_base(&Scalar::from(num));
 
@@ -553,7 +618,7 @@ mod tests {
                 point = point.compress().decompress().unwrap();
             }
 
-            let res = decode(&tables, point, ECDLPArguments::new_with_range(0, 1 << 48));
+            let res = decode(&view, point, ECDLPArguments::new_with_range(0, 1 << 48));
             assert_eq!(res, Some(num as i64));
 
             println!("tested {num}");
