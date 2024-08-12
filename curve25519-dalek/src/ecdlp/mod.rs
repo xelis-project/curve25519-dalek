@@ -175,12 +175,12 @@ impl<const L1: usize> ECDLPTables<L1> {
     #[cfg(feature = "std")]
     pub fn load_from_file(path: &str) -> std::io::Result<Self> {
         use std::io::Read;
+        let mut zelf = Self::empty();
 
         let mut file = std::fs::File::open(path)?;
-        let (size, n) = Self::get_required_sizes();
-        let mut bytes = vec![Default::default(); n];
-        file.read_exact(bytemuck::cast_slice_mut(&mut bytes))?;
-        Ok(Self { bytes, size })
+        file.read_exact(zelf.as_mut_slice())?;
+
+        Ok(zelf)
     }
 
     /// Write the tables to a file.
@@ -189,7 +189,7 @@ impl<const L1: usize> ECDLPTables<L1> {
         use std::io::Write;
 
         let mut file = std::fs::File::create(path)?;
-        file.write_all(bytemuck::cast_slice(&self.bytes))?;
+        file.write_all(self.as_slice())?;
         Ok(())
     }
 
