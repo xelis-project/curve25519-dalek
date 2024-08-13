@@ -137,7 +137,7 @@ pub struct ECDLPTables<const L1: usize> {
 
 impl<const L1: usize> ECDLPTables<L1> {
     /// Get the expected final bytes size and number of vec elements in the tables.
-    fn get_required_sizes() -> (usize, usize) {
+    pub fn get_required_sizes() -> (usize, usize) {
         let size = table_generation::table_file_len(L1);
         let mut n = size / 32;
         if size % 32 != 0 {
