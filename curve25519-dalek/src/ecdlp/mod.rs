@@ -171,6 +171,14 @@ impl<const L1: usize> ECDLPTables<L1> {
         Ok(zelf)
     }
 
+    /// Load the tables from a bytes slice.
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        let mut zelf = Self::empty();
+        zelf.as_mut_slice().copy_from_slice(bytes);
+
+        zelf
+    }
+
     /// Load the tables from a file.
     #[cfg(feature = "std")]
     pub fn load_from_file(path: &str) -> std::io::Result<Self> {
