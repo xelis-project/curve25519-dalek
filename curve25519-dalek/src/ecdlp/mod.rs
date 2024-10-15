@@ -30,18 +30,23 @@
 //! # Example
 //!
 //! Decoding a 48bit number using a L1=26 precomputed tables file.
-//! ```
-//! use curve25519_dalek::constants::{RISTRETTO_BASEPOINT_POINT as G};
+//! ```no_run
+//! use curve25519_dalek::{
+//!     constants::{RISTRETTO_BASEPOINT_POINT as G},
+//!     ecdlp::{ECDLPTables, decode, ECDLPArguments},
+//!     Scalar,
+//!     RistrettoPoint,
+//! };
 //!
-//! let precomputed_tables = ECDLPTablesFile::<26>::load_from_file("ecdlp_table_26.bin")
+//! let precomputed_tables = ECDLPTables::load_from_file(26, "ecdlp_table_26.bin")
 //!     .unwrap();
 //!
 //! let num = 258383831730230u64;
 //! let to_decode = Scalar::from(num) * G;
 //!
 //! assert_eq!(
-//!     decode(precomputed_tables, to_decode, ECDLPArguments::new_with_range(0, 1 << 48)),
-//!     Some(num)
+//!     decode(&precomputed_tables.view(), to_decode, ECDLPArguments::new_with_range(0, 1 << 48)),
+//!     Some(num as i64)
 //! );
 //! ```
 
@@ -130,15 +135,16 @@ struct ForcedAlign32([u8; 32]);
 /// The tables file is a big array of ForcedAlign32, which is a 32-byte aligned array of bytes.
 /// Some bytes may be used as padding only.
 /// This prevent using memory-mapped files, as the alignment is not guaranteed.
-pub struct ECDLPTables<const L1: usize> {
+pub struct ECDLPTables {
     bytes: Vec<ForcedAlign32>,
+    l1: usize,
     size: usize,
 }
 
-impl<const L1: usize> ECDLPTables<L1> {
+impl ECDLPTables {
     /// Get the expected final bytes size and number of vec elements in the tables.
-    pub fn get_required_sizes() -> (usize, usize) {
-        let size = table_generation::table_file_len(L1);
+    pub fn get_required_sizes(l1: usize) -> (usize, usize) {
+        let size = table_generation::table_file_len(l1);
         let mut n = size / 32;
         if size % 32 != 0 {
             n += 1;
@@ -147,33 +153,34 @@ impl<const L1: usize> ECDLPTables<L1> {
     }
 
     /// Create a new empty precomputed tables.
-    pub fn empty() -> Self {
-        let (size, n) = Self::get_required_sizes();
+    pub fn empty(l1: usize) -> Self {
+        let (size, n) = Self::get_required_sizes(l1);
         Self {
+            l1,
             bytes: vec![Default::default(); n],
             size,
         }
     }
 
     /// Generate a new precomputed tables
-    pub fn generate() -> std::io::Result<Self> {
-        let mut zelf = Self::empty();
-        table_generation::create_table_file(L1, zelf.as_mut_slice())?;
+    pub fn generate(l1: usize) -> std::io::Result<Self> {
+        let mut zelf = Self::empty(l1);
+        table_generation::create_table_file(l1, zelf.as_mut_slice())?;
 
         Ok(zelf)
     }
 
     /// Generate a new precomputed tables with a progress report function.
-    pub fn generate_with_progress_report<P: ProgressTableGenerationReportFunction>(p: P) -> std::io::Result<Self> {
-        let mut zelf = Self::empty();
-        table_generation::create_table_file_with_progress_report(L1, zelf.as_mut_slice(), p)?;
+    pub fn generate_with_progress_report<P: ProgressTableGenerationReportFunction>(l1: usize, p: P) -> std::io::Result<Self> {
+        let mut zelf = Self::empty(l1);
+        table_generation::create_table_file_with_progress_report(l1, zelf.as_mut_slice(), p)?;
 
         Ok(zelf)
     }
 
     /// Load the tables from a bytes slice.
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        let mut zelf = Self::empty();
+    pub fn from_bytes(l1: usize, bytes: &[u8]) -> Self {
+        let mut zelf = Self::empty(l1);
         zelf.as_mut_slice().copy_from_slice(bytes);
 
         zelf
@@ -181,9 +188,9 @@ impl<const L1: usize> ECDLPTables<L1> {
 
     /// Load the tables from a file.
     #[cfg(feature = "std")]
-    pub fn load_from_file(path: &str) -> std::io::Result<Self> {
+    pub fn load_from_file(l1: usize, path: &str) -> std::io::Result<Self> {
         use std::io::Read;
-        let mut zelf = Self::empty();
+        let mut zelf = Self::empty(l1);
 
         let mut file = std::fs::File::open(path)?;
         file.read_exact(zelf.as_mut_slice())?;
@@ -212,8 +219,8 @@ impl<const L1: usize> ECDLPTables<L1> {
     }
 
     /// Get a view of the tables.
-    pub fn view(&self) -> ECDLPTablesFileView<'_, L1> {
-        ECDLPTablesFileView::from_bytes(self.as_slice())
+    pub fn view(&self) -> ECDLPTablesFileView<'_> {
+        ECDLPTablesFileView::from_bytes(self.as_slice(), self.l1)
     }
 }
 
@@ -263,7 +270,10 @@ impl<F: ProgressReportFunction> ECDLPArguments<F> {
     ///
     /// # Example
     ///
-    /// ```
+    /// ```no_run
+    /// use curve25519_dalek::ecdlp::ECDLPArguments;
+    /// use std::ops::ControlFlow;
+    /// 
     /// let ecdlp_args = ECDLPArguments::new_with_range(0, 1 << 48)
     ///     .progress_report_function(|_progress| {
     ///         // do something with `progress`
@@ -289,6 +299,8 @@ impl<F: ProgressReportFunction> ECDLPArguments<F> {
     /// # Example
     ///
     /// ```
+    /// use curve25519_dalek::ecdlp::ECDLPArguments;
+    /// 
     /// let n_threads = std::thread::available_parallelism()
     ///     .expect("cannot get available parallelism")
     ///     .get();
@@ -301,18 +313,18 @@ impl<F: ProgressReportFunction> ECDLPArguments<F> {
 }
 
 /// Offset calculations common to [`par_decode`] and [`decode`].
-fn decode_prep<const L1: usize, R: ProgressReportFunction>(
-    _precomputed_tables: &ECDLPTablesFileView<'_, L1>,
+fn decode_prep<R: ProgressReportFunction>(
+    precomputed_tables: &ECDLPTablesFileView<'_>,
     point: RistrettoPoint,
     args: &ECDLPArguments<R>,
     _n_threads: usize,
 ) -> (i64, RistrettoPoint, usize) {
     let amplitude = (args.range_end - args.range_start).max(0);
 
-    let offset = args.range_start + ((1 << (L2 - 1)) << L1) + (1 << (L1 - 1));
+    let offset = args.range_start + ((1 << (L2 - 1)) << precomputed_tables.get_l1()) + (1 << (precomputed_tables.get_l1() - 1));
     let normalized = &point - RistrettoPoint::mul_base(&i64_to_scalar(offset));
 
-    let j_end = (amplitude >> L1) as usize; // amplitude / 2^(L1 + 1)
+    let j_end = (amplitude >> precomputed_tables.get_l1()) as usize; // amplitude / 2^(L1 + 1)
 
     // FIXME: is there a better way to divceil other than pulling the `num` crate?
     let divceil = |a, b| (a + b - 1) / b;
@@ -324,8 +336,8 @@ fn decode_prep<const L1: usize, R: ProgressReportFunction>(
 
 /// Returns an iterator of batches for a given thread. Common to [`par_decode`] and [`decode`].
 /// Iterator item is (index, j_start, target_montgomery, progress).
-fn make_point_iterator<const L1: usize>(
-    _precomputed_tables: &ECDLPTablesFileView<'_, L1>,
+fn make_point_iterator(
+    precomputed_tables: &ECDLPTablesFileView<'_>,
     normalized: RistrettoPoint,
     num_batches: usize,
     n_threads: usize,
@@ -341,7 +353,7 @@ fn make_point_iterator<const L1: usize>(
 
     let thread_iter = batch_iterator.skip(thread_i).step_by(n_threads);
 
-    let els_per_batch: u64 = 1u64 << (L2 + L1);
+    let els_per_batch: u64 = 1u64 << (L2 + precomputed_tables.get_l1());
 
     // starting point for this thread
     let t_normalized = &normalized - &i64_to_scalar((thread_i as u64 * els_per_batch) as i64) * G;
@@ -364,8 +376,8 @@ fn make_point_iterator<const L1: usize>(
 /// Decode a [`RistrettoPoint`] to the represented integer.
 /// This may take a long time, so if you are running on an event-loop such as `tokio`, you
 /// should wrap this in a `tokio::block_on` task.
-pub fn decode<const L1: usize, R: ProgressReportFunction>(
-    precomputed_tables: &ECDLPTablesFileView<'_, L1>,
+pub fn decode<R: ProgressReportFunction>(
+    precomputed_tables: &ECDLPTablesFileView<'_>,
     point: RistrettoPoint,
     args: ECDLPArguments<R>,
 ) -> Option<i64> {
@@ -385,8 +397,8 @@ pub fn decode<const L1: usize, R: ProgressReportFunction>(
 /// This uses [`std::thread`] as a threading primitive, and as such, it is only available when the `std` feature is enabled.
 /// This may take a long time, so if you are running on an event-loop such as `tokio`, you
 /// should wrap this in a `tokio::block_on` task.
-pub fn par_decode<const L1: usize, R: ProgressReportFunction + Sync>(
-    precomputed_tables: &ECDLPTablesFileView<'_, L1>,
+pub fn par_decode<R: ProgressReportFunction + Sync>(
+    precomputed_tables: &ECDLPTablesFileView<'_>,
     point: RistrettoPoint,
     args: ECDLPArguments<R>,
 ) -> Option<i64> {
@@ -452,8 +464,8 @@ pub fn par_decode<const L1: usize, R: ProgressReportFunction + Sync>(
     res.map(|v| v as i64 + offset)
 }
 
-fn fast_ecdlp<const L1: usize>(
-    precomputed_tables: &ECDLPTablesFileView<'_, L1>,
+fn fast_ecdlp(
+    precomputed_tables: &ECDLPTablesFileView<'_>,
     target_point: RistrettoPoint,
     point_iterator: impl Iterator<Item = (usize, usize, AffineMontgomeryPoint, f64)>,
     pseudo_constant_time: bool,
@@ -483,7 +495,7 @@ fn fast_ecdlp<const L1: usize>(
 
         // Case 0: target is 0. Has to be handled separately.
         if target_montgomery.is_identity_not_ct() {
-            consider_candidate((j_start as i64) << L1);
+            consider_candidate((j_start as i64) << precomputed_tables.get_l1());
             if !pseudo_constant_time {
                 break 'outer;
             }
@@ -492,8 +504,8 @@ fn fast_ecdlp<const L1: usize>(
         // Case 2: j=0. Has to be handled separately.
         if t1_table
             .lookup(&target_montgomery.u.as_bytes(), |i| {
-                consider_candidate(((j_start as i64) << L1) + i as i64)
-                    || consider_candidate(((j_start as i64) << L1) - i as i64)
+                consider_candidate(((j_start as i64) << precomputed_tables.get_l1()) + i as i64)
+                    || consider_candidate(((j_start as i64) << precomputed_tables.get_l1()) - i as i64)
             })
             .is_some()
         {
@@ -511,8 +523,8 @@ fn fast_ecdlp<const L1: usize>(
             if diff == FieldElement::ZERO {
                 // Case 1: (Montgomery addition) exceptional case when T2[j] = Pm.
                 // m1 = j * 2^L1, m2 = -j * 2^L1
-                let found = consider_candidate((j_start as i64 + j as i64) << L1)
-                    || consider_candidate((j_start as i64 - j as i64) << L1);
+                let found = consider_candidate((j_start as i64 + j as i64) << precomputed_tables.get_l1())
+                    || consider_candidate((j_start as i64 - j as i64) << precomputed_tables.get_l1());
                 if !pseudo_constant_time && found {
                     break 'outer;
                 }
@@ -539,8 +551,8 @@ fn fast_ecdlp<const L1: usize>(
             // Case 3: general case, negative j.
             if t1_table
                 .lookup(&qx.as_bytes(), |i| {
-                    consider_candidate(((j_start as i64 - j as i64) << L1) + i as i64)
-                        || consider_candidate(((j_start as i64 - j as i64) << L1) - i as i64)
+                    consider_candidate(((j_start as i64 - j as i64) << precomputed_tables.get_l1()) + i as i64)
+                        || consider_candidate(((j_start as i64 - j as i64) << precomputed_tables.get_l1()) - i as i64)
                 })
                 .is_some()
             {
@@ -558,8 +570,8 @@ fn fast_ecdlp<const L1: usize>(
             // Case 4: general case, positive j.
             if t1_table
                 .lookup(&qx.as_bytes(), |i| {
-                    consider_candidate(((j_start as i64 + j as i64) << L1) + i as i64)
-                        || consider_candidate(((j_start as i64 + j as i64) << L1) - i as i64)
+                    consider_candidate(((j_start as i64 + j as i64) << precomputed_tables.get_l1()) + i as i64)
+                        || consider_candidate(((j_start as i64 + j as i64) << precomputed_tables.get_l1()) - i as i64)
                 })
                 .is_some()
             {
@@ -592,13 +604,13 @@ mod tests {
 
     #[test]
     fn gen_t1_t2() {
-        let tables = ECDLPTables::<L1>::generate().unwrap();
+        let tables = ECDLPTables::generate(L1).unwrap();
         tables.write_to_file("ecdlp_table.bin").unwrap();
     }
 
     #[test]
     fn test_ecdlp_cofactors() {
-        let tables = ECDLPTables::<L1>::load_from_file("ecdlp_table.bin").unwrap();
+        let tables = ECDLPTables::load_from_file(L1, "ecdlp_table.bin").unwrap();
         let view = tables.view();
 
         for i in (0..(1u64 << 48)).step_by(1 << L1).take(1 << 12) {
@@ -625,7 +637,7 @@ mod tests {
 
     #[test]
     fn test_ecdlp() {
-        let tables = ECDLPTables::<L1>::load_from_file("ecdlp_table.bin").unwrap();
+        let tables = ECDLPTables::load_from_file(L1, "ecdlp_table.bin").unwrap();
         let view = tables.view();
 
         for i in (0..(1u64 << 48)).step_by(1 << L1).take(1 << 12) {
@@ -649,7 +661,7 @@ mod tests {
     fn test_ecdlp_par_decode() {
         let value: u64 = 1<<48;
 
-        let tables = ECDLPTables::<L1>::load_from_file("ecdlp_table.bin").unwrap();
+        let tables = ECDLPTables::load_from_file(L1, "ecdlp_table.bin").unwrap();
         let view = tables.view();
 
         let point = RistrettoPoint::mul_base(&Scalar::from(value));

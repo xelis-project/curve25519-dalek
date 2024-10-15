@@ -23,31 +23,45 @@ pub(crate) const CUCKOO_K: usize = 3; // number of cuckoo lookups before giving 
 // We just do casts using `bytemuck` since everything are PODs.
 
 /// A view into an ECDLP precomputed table. This is a wrapper around a read-only byte array, which you could back by an mmaped file, for example.
-pub struct ECDLPTablesFileView<'a, const L1: usize> {
+pub struct ECDLPTablesFileView<'a> {
     bytes: &'a [u8],
+    l1: usize,
 }
 
-impl<'a, const L1: usize> ECDLPTablesFileView<'a, L1> {
-    const J_BITS: usize = L1 - 1;
-    const J_MAX: usize = 1 << Self::J_BITS;
-    const CUCKOO_LEN: usize = (Self::J_MAX as u64 * 30 / 100) as usize + Self::J_MAX;
-
-    /// ECDLP algorithm may panic if the alignment or size of `bytes` is wrong.
-    pub fn from_bytes(bytes: &'a [u8]) -> Self {
-        // TODO(merge): check align/size of `bytes` here
-        Self { bytes }
+impl<'a> ECDLPTablesFileView<'a> {
+    /// Calculate the cuckoo length for a given `l1` const.
+    pub fn cuckoo_len(l1: usize) -> usize {
+        let j_max: u64 = 1 << (l1 - 1);
+        // x1.3 is the load factor of the cuckoo hashmap.
+        ((j_max * 30 / 100) + j_max) as usize
     }
 
-    pub(crate) fn get_t1(&self) -> CuckooT1HashMapView<'_, L1> {
+    /// ECDLP algorithm may panic if the alignment or size of `bytes` is wrong.
+    pub fn from_bytes(bytes: &'a [u8], l1: usize) -> Self {
+        // TODO(merge): check align/size of `bytes` here
+        Self { bytes, l1 }
+    }
+
+    /// Get the T1 table.
+    pub(crate) fn get_t1(&self) -> CuckooT1HashMapView<'_> {
         let t1_keys_values: &[u32] =
             bytemuck::cast_slice(&self.bytes[(size_of::<T2MontgomeryCoordinates>() * I_MAX)..]);
 
+        let cuckoo_len = Self::cuckoo_len(self.l1);
         CuckooT1HashMapView {
-            keys: &t1_keys_values[0..Self::CUCKOO_LEN],
-            values: &t1_keys_values[Self::CUCKOO_LEN..],
+            keys: &t1_keys_values[0..cuckoo_len],
+            values: &t1_keys_values[cuckoo_len..],
+            cuckoo_len,
         }
     }
 
+    /// Get the `l1` constant used to generate the tables.
+    #[inline(always)]
+    pub fn get_l1(&self) -> usize {
+        self.l1
+    }
+
+    /// Get the T2 table.
     pub(crate) fn get_t2(&self) -> T2LinearTableView<'_> {
         let t2: &[T2MontgomeryCoordinates] =
             bytemuck::cast_slice(&self.bytes[0..(size_of::<T2MontgomeryCoordinates>() * I_MAX)]);
@@ -97,14 +111,16 @@ impl T2LinearTableView<'_> {
 }
 
 /// A view into the T1 table.
-pub(crate) struct CuckooT1HashMapView<'a, const L1: usize> {
+pub(crate) struct CuckooT1HashMapView<'a> {
     /// Cuckoo keys
     pub keys: &'a [u32],
     /// Cuckoo values
     pub values: &'a [u32],
+    /// Cuckoo length for provided L1
+    pub cuckoo_len: usize,
 }
 
-impl<'a, const L1: usize> CuckooT1HashMapView<'a, L1> {
+impl<'a> CuckooT1HashMapView<'a> {
     pub(crate) fn lookup(
         &self,
         x: &[u8],
@@ -115,7 +131,7 @@ impl<'a, const L1: usize> CuckooT1HashMapView<'a, L1> {
             let end = start + 4;
             let key = u32::from_be_bytes(x[end..end + 4].try_into().unwrap());
             let h = u32::from_be_bytes(x[start..start + 4].try_into().unwrap()) as usize
-                % ECDLPTablesFileView::<L1>::CUCKOO_LEN;
+                % self.cuckoo_len;
             if self.keys[h as usize] == key {
                 let value = self.values[h as usize] as u64;
                 if is_problem_answer(value) {

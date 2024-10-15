@@ -11,7 +11,7 @@ use curve25519_dalek::{
 use rand::Rng;
 
 pub fn ecdlp_bench(c: &mut Criterion) {
-    let tables = ECDLPTables::<26>::load_from_file("ecdlp_table.bin").unwrap();
+    let tables = ECDLPTables::load_from_file(26, "ecdlp_table.bin").unwrap();
     let view = tables.view();
 
     c.bench_function("fast ecdlp", |b| {

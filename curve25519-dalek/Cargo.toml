@@ -59,8 +59,7 @@ digest = { version = "0.10", default-features = false, optional = true }
 subtle = { version = "2.6.0", default-features = false, features = ["const-generics"]}
 serde = { version = "1.0", default-features = false, optional = true, features = ["derive"] }
 zeroize = { version = "1", default-features = false, optional = true }
-# todo gate these behind features (they are not strictly necessary)
-bytemuck = { version = "1.14.0", features = ["derive"] }
+bytemuck = { version = "1.14.0", features = ["derive"], optional = true }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 cpufeatures = "0.2.6"
@@ -77,7 +76,7 @@ precomputed-tables = []
 legacy_compatibility = []
 group = ["dep:group", "rand_core"]
 group-bits = ["group", "ff/bits"]
-ecdlp = ["std"]
+ecdlp = ["std", "dep:bytemuck"]
 
 [target.'cfg(all(not(curve25519_dalek_backend = "fiat"), not(curve25519_dalek_backend = "serial"), target_arch = "x86_64"))'.dependencies]
 curve25519-dalek-derive = { version = "0.1", path = "../curve25519-dalek-derive" }
