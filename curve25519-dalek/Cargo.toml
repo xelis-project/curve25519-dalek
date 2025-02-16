@@ -27,7 +27,7 @@ rustdoc-args = [
     "--html-in-header", "docs/assets/rustdoc-include-katex-header.html",
     "--cfg", "docsrs",
 ]
-features = ["serde", "rand_core", "digest", "legacy_compatibility", "group-bits"]
+features = ["serde", "rand_core", "digest", "std", "ecdlp", "legacy_compatibility", "group-bits"]
 
 [dev-dependencies]
 sha2 = { version = "0.10", default-features = false }
@@ -45,6 +45,11 @@ name = "dalek_benchmarks"
 harness = false
 required-features = ["alloc", "rand_core"]
 
+[[bench]]
+name = "ecdlp"
+harness = false
+required-features = ["alloc", "rand_core", "std", "ecdlp"]
+
 [dependencies]
 cfg-if = "1"
 ff = { version = "0.13", default-features = false, optional = true }
@@ -54,6 +59,7 @@ digest = { version = "0.10", default-features = false, optional = true }
 subtle = { version = "2.6.0", default-features = false, features = ["const-generics"]}
 serde = { version = "1.0", default-features = false, optional = true, features = ["derive"] }
 zeroize = { version = "1", default-features = false, optional = true }
+bytemuck = { version = "1.14.0", features = ["derive"], optional = true }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 cpufeatures = "0.2.6"
@@ -62,12 +68,15 @@ cpufeatures = "0.2.6"
 fiat-crypto = { version = "0.2.1", default-features = false }
 
 [features]
-default = ["alloc", "precomputed-tables", "zeroize"]
+default = ["alloc", "precomputed-tables", "zeroize", "ecdlp"]
 alloc = ["zeroize?/alloc"]
+std = []
+precompute_table_gen = ["alloc"]
 precomputed-tables = []
 legacy_compatibility = []
 group = ["dep:group", "rand_core"]
 group-bits = ["group", "ff/bits"]
+ecdlp = ["std", "dep:bytemuck"]
 
 [target.'cfg(all(not(curve25519_dalek_backend = "fiat"), not(curve25519_dalek_backend = "serial"), target_arch = "x86_64"))'.dependencies]
 curve25519-dalek-derive = { version = "0.1", path = "../curve25519-dalek-derive" }
