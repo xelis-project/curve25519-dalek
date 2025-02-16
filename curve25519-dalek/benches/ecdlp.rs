@@ -1,3 +1,4 @@
+use std::path::Path;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use curve25519_dalek::{
     constants::RISTRETTO_BASEPOINT_POINT as G,
@@ -11,6 +12,11 @@ use curve25519_dalek::{
 use rand::Rng;
 
 pub fn ecdlp_bench(c: &mut Criterion) {
+    if !Path::new("ecdlp_table.bin").exists() {
+        let tables = ECDLPTables::generate(26).unwrap();
+        tables.write_to_file("ecdlp_table.bin").unwrap();
+    }
+
     let tables = ECDLPTables::load_from_file(26, "ecdlp_table.bin").unwrap();
     let view = tables.view();
 
