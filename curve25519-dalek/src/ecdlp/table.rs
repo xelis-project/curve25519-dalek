@@ -120,7 +120,7 @@ pub(crate) struct CuckooT1HashMapView<'a> {
     pub cuckoo_len: usize,
 }
 
-impl<'a> CuckooT1HashMapView<'a> {
+impl CuckooT1HashMapView<'_> {
     pub(crate) fn lookup(
         &self,
         x: &[u8],
@@ -132,8 +132,8 @@ impl<'a> CuckooT1HashMapView<'a> {
             let key = u32::from_be_bytes(x[end..end + 4].try_into().unwrap());
             let h = u32::from_be_bytes(x[start..start + 4].try_into().unwrap()) as usize
                 % self.cuckoo_len;
-            if self.keys[h as usize] == key {
-                let value = self.values[h as usize] as u64;
+            if self.keys[h] == key {
+                let value = self.values[h] as u64;
                 if is_problem_answer(value) {
                     return Some(value);
                 }
@@ -212,7 +212,7 @@ pub mod table_generation {
             for j in 0..CUCKOO_MAX_INSERT_SWAPS {
                 let x = all_entries[v as usize].as_ref();
                 let start = (old_hash_id as usize - 1) * 8;
-                let end = start as usize + 4;
+                let end = start + 4;
                 let mut key = u32::from_be_bytes(x[end..end + 4].try_into().unwrap());
                 let h1 = u32::from_be_bytes(x[start..start + 4].try_into().unwrap()) as usize;
                 let h = h1 % cuckoo_len;

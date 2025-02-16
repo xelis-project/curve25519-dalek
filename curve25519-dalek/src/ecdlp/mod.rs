@@ -438,7 +438,7 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
                         normalized,
                         point_iter,
                         args.pseudo_constant_time,
-                        &progress_report,
+                        progress_report,
                     );
 
                     if !args.pseudo_constant_time && res.is_some() {
@@ -507,16 +507,13 @@ fn fast_ecdlp(
                 consider_candidate(((j_start as i64) << precomputed_tables.get_l1()) + i as i64)
                     || consider_candidate(((j_start as i64) << precomputed_tables.get_l1()) - i as i64)
             })
-            .is_some()
-        {
-            if !pseudo_constant_time {
-                break 'outer;
-            }
+            .is_some() && !pseudo_constant_time {
+            break 'outer;
         }
 
         // Z = T2[j]_x - Pm_x
-        for batch_i in 0..BATCH_SIZE {
-            let j = batch_i + 1;
+        for (i, batch) in batch.iter_mut().enumerate() {
+            let j = i + 1;
             let t2_point = t2_table.index(j as _);
             let diff = &t2_point.u - &target_montgomery.u;
 
@@ -529,7 +526,7 @@ fn fast_ecdlp(
                     break 'outer;
                 }
             }
-            batch[batch_i] = diff;
+            *batch = diff;
         }
 
         // nu = Z^-1
@@ -545,7 +542,7 @@ fn fast_ecdlp(
 
             // lambda = (T2[j]_y - Pm_y) * nu
             // Q_x = lambda^2 - A - T2[j]_x - Pm_x
-            let lambda = &(&t2_point.v - &target_montgomery.v) * &nu;
+            let lambda = &(&t2_point.v - &target_montgomery.v) * nu;
             let qx = &lambda.square() + &alpha;
 
             // Case 3: general case, negative j.
@@ -564,7 +561,7 @@ fn fast_ecdlp(
 
             // lambda = (p - T2[j]_y - Pm_y) * nu
             // Q_x = lambda^2 - A - T2[j]_x - Pm_x
-            let lambda = &(&-&t2_point.v - &target_montgomery.v) * &nu;
+            let lambda = &(&-&t2_point.v - &target_montgomery.v) * nu;
             let qx = &lambda.square() + &alpha;
 
             // Case 4: general case, positive j.
@@ -616,7 +613,7 @@ mod tests {
         for i in (0..(1u64 << 48)).step_by(1 << L1).take(1 << 12) {
             let delta = rand::thread_rng().gen_range(0..(1 << L1));
 
-            let num = i as u64 + delta;
+            let num = i + delta;
             let point = RistrettoPoint::mul_base(&Scalar::from(num));
 
             // take a random point from the coset4
@@ -641,7 +638,7 @@ mod tests {
         let view = tables.view();
 
         for i in (0..(1u64 << 48)).step_by(1 << L1).take(1 << 12) {
-            let num = i as u64; // rand::thread_rng().gen_range(0u64..(1 << 48));
+            let num = i; // rand::thread_rng().gen_range(0u64..(1 << 48));
             let mut point = RistrettoPoint::mul_base(&Scalar::from(num));
 
             if rand::thread_rng().gen() {
