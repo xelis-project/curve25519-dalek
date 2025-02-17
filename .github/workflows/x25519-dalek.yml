@@ -2,10 +2,10 @@ name: x25519 Rust
 
 on:
   push:
-    branches: [ '**' ]
+    branches: [ "master" ]
     paths: 'x25519-dalek/**'
   pull_request:
-    branches: [ '**' ]
+    branches: [ "master" ]
     paths: 'x25519-dalek/**'
 
 defaults:

@@ -2,12 +2,12 @@ name: curve25519 Rust
 
 on:
   push:
-    branches: [ '**' ]
+    branches: [ "master" ]
     paths:
       - 'curve25519-dalek/**'
       - '.github/workflows/curve25519-dalek.yml'
   pull_request:
-    branches: [ '**' ]
+    branches: [ "master" ]
     paths:
       - 'curve25519-dalek/**'
       - '.github/workflows/curve25519-dalek.yml'

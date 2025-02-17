@@ -2,10 +2,10 @@ name: ed25519 Rust
 
 on:
   push:
-    branches: [ '**' ]
+    branches: [ "master" ]
     paths: 'ed25519-dalek/**'
   pull_request:
-    branches: [ '**' ]
+    branches: [ "master" ]
     paths: 'ed25519-dalek/**'
 
 defaults:
