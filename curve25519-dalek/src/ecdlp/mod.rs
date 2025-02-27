@@ -454,7 +454,7 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
                         end_flag.store(true, Ordering::SeqCst);
                     }
 
-                    (res, offset)
+                    res.map(|v| offset + v as i64)
                 });
 
                 handle
@@ -464,13 +464,13 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
         let mut res = None;
         for el in handles {
             let v = el.join().expect("child thread panicked");
-            res = res.or(if v.0.is_some() {Some(v)} else {res});
+            res = res.or(v);
         }
 
         res
     });
 
-    res.map(|v| v.0.unwrap() as i64 + v.1)
+    res
 }
 
 fn fast_ecdlp(
@@ -486,7 +486,6 @@ fn fast_ecdlp(
     let mut found = None;
     let mut consider_candidate = |m| {
         let l1 = precomputed_tables.get_l1();
-        let derived_j_start = (m >> l1) as usize;  // Shift right by L1
         if i64_to_scalar(m) * G == target_point {
             found = found.or(Some(m as u64));
             true
