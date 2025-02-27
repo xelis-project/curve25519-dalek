@@ -91,14 +91,14 @@ mod affine_montgomery;
 mod table;
 
 use crate::{
-  constants::MONTGOMERY_A_NEG,
-  constants::RISTRETTO_BASEPOINT_POINT as G,
-  field::FieldElement, RistrettoPoint, Scalar,
+    constants::MONTGOMERY_A_NEG,
+    constants::RISTRETTO_BASEPOINT_POINT as G,
+    field::FieldElement, RistrettoPoint, Scalar,
 };
 use affine_montgomery::AffineMontgomeryPoint;
 use core::{
-  ops::ControlFlow,
-  sync::atomic::{AtomicBool, Ordering}
+    ops::ControlFlow,
+    sync::atomic::{AtomicBool, Ordering}
 };
 
 pub use table::{table_generation, ECDLPTablesFileView, ProgressTableGenerationReportFunction, NoOpProgressTableGenerationReportFunction, ReportStep};
@@ -108,22 +108,22 @@ use table::{BATCH_SIZE, L2};
 /// A trait to represent progress report functions.
 /// It is auto-implemented on any `F: Fn(f64) -> ConstrolFlow<()>`.
 pub trait ProgressReportFunction {
-  /// Run the progress report function.
-  fn report(&self, progress: f64) -> ControlFlow<()>;
+    /// Run the progress report function.
+    fn report(&self, progress: f64) -> ControlFlow<()>;
 }
 impl<F: Fn(f64) -> ControlFlow<()>> ProgressReportFunction for F {
-  #[inline(always)]
-  fn report(&self, progress: f64) -> ControlFlow<()> {
-      self(progress)
-  }
+    #[inline(always)]
+    fn report(&self, progress: f64) -> ControlFlow<()> {
+        self(progress)
+    }
 }
 /// The Noop (no operation) report function. It does nothing and will never break.
 pub struct NoopReportFn;
 impl ProgressReportFunction for NoopReportFn {
-  #[inline(always)]
-  fn report(&self, _progress: f64) -> ControlFlow<()> {
-      ControlFlow::Continue(())
-  }
+    #[inline(always)]
+    fn report(&self, _progress: f64) -> ControlFlow<()> {
+        ControlFlow::Continue(())
+    }
 }
 
 /// A struct to ensure that the bytes are aligned on 32 bytes.
@@ -136,180 +136,180 @@ struct ForcedAlign32([u8; 32]);
 /// Some bytes may be used as padding only.
 /// This prevent using memory-mapped files, as the alignment is not guaranteed.
 pub struct ECDLPTables {
-  bytes: Vec<ForcedAlign32>,
-  l1: usize,
-  size: usize,
+    bytes: Vec<ForcedAlign32>,
+    l1: usize,
+    size: usize,
 }
 
 impl ECDLPTables {
-  /// Get the expected final bytes size and number of vec elements in the tables.
-  pub fn get_required_sizes(l1: usize) -> (usize, usize) {
-      let size = table_generation::table_file_len(l1);
-      let mut n = size / 32;
-      if size % 32 != 0 {
-          n += 1;
-      }
-      (size, n)
-  }
+    /// Get the expected final bytes size and number of vec elements in the tables.
+    pub fn get_required_sizes(l1: usize) -> (usize, usize) {
+        let size = table_generation::table_file_len(l1);
+        let mut n = size / 32;
+        if size % 32 != 0 {
+            n += 1;
+        }
+        (size, n)
+    }
 
-  /// Create a new empty precomputed tables.
-  pub fn empty(l1: usize) -> Self {
-      let (size, n) = Self::get_required_sizes(l1);
-      Self {
-          l1,
-          bytes: vec![Default::default(); n],
-          size,
-      }
-  }
+    /// Create a new empty precomputed tables.
+    pub fn empty(l1: usize) -> Self {
+        let (size, n) = Self::get_required_sizes(l1);
+        Self {
+            l1,
+            bytes: vec![Default::default(); n],
+            size,
+        }
+    }
 
-  /// Generate a new precomputed tables
-  pub fn generate(l1: usize) -> std::io::Result<Self> {
-      let mut zelf = Self::empty(l1);
-      table_generation::create_table_file(l1, zelf.as_mut_slice())?;
+    /// Generate a new precomputed tables
+    pub fn generate(l1: usize) -> std::io::Result<Self> {
+        let mut zelf = Self::empty(l1);
+        table_generation::create_table_file(l1, zelf.as_mut_slice())?;
 
-      Ok(zelf)
-  }
+        Ok(zelf)
+    }
 
-  /// Generate a new precomputed tables with a progress report function.
-  pub fn generate_with_progress_report<P: ProgressTableGenerationReportFunction>(l1: usize, p: P) -> std::io::Result<Self> {
-      let mut zelf = Self::empty(l1);
-      table_generation::create_table_file_with_progress_report(l1, zelf.as_mut_slice(), p)?;
+    /// Generate a new precomputed tables with a progress report function.
+    pub fn generate_with_progress_report<P: ProgressTableGenerationReportFunction>(l1: usize, p: P) -> std::io::Result<Self> {
+        let mut zelf = Self::empty(l1);
+        table_generation::create_table_file_with_progress_report(l1, zelf.as_mut_slice(), p)?;
 
-      Ok(zelf)
-  }
+        Ok(zelf)
+    }
 
-  /// Load the tables from a bytes slice.
-  pub fn from_bytes(l1: usize, bytes: &[u8]) -> Self {
-      let mut zelf = Self::empty(l1);
-      zelf.as_mut_slice().copy_from_slice(bytes);
+    /// Load the tables from a bytes slice.
+    pub fn from_bytes(l1: usize, bytes: &[u8]) -> Self {
+        let mut zelf = Self::empty(l1);
+        zelf.as_mut_slice().copy_from_slice(bytes);
 
-      zelf
-  }
+        zelf
+    }
 
-  /// Load the tables from a file.
-  #[cfg(feature = "std")]
-  pub fn load_from_file(l1: usize, path: &str) -> std::io::Result<Self> {
-      use std::io::Read;
-      let mut zelf = Self::empty(l1);
+    /// Load the tables from a file.
+    #[cfg(feature = "std")]
+    pub fn load_from_file(l1: usize, path: &str) -> std::io::Result<Self> {
+        use std::io::Read;
+        let mut zelf = Self::empty(l1);
 
-      let mut file = std::fs::File::open(path)?;
-      file.read_exact(zelf.as_mut_slice())?;
+        let mut file = std::fs::File::open(path)?;
+        file.read_exact(zelf.as_mut_slice())?;
 
-      Ok(zelf)
-  }
+        Ok(zelf)
+    }
 
-  /// Write the tables to a file.
-  #[cfg(feature = "std")]
-  pub fn write_to_file(&self, path: &str) -> std::io::Result<()> {
-      use std::io::Write;
+    /// Write the tables to a file.
+    #[cfg(feature = "std")]
+    pub fn write_to_file(&self, path: &str) -> std::io::Result<()> {
+        use std::io::Write;
 
-      let mut file = std::fs::File::create(path)?;
-      file.write_all(self.as_slice())?;
-      Ok(())
-  }
+        let mut file = std::fs::File::create(path)?;
+        file.write_all(self.as_slice())?;
+        Ok(())
+    }
 
-  /// Get the tables as a slice of bytes.
-  pub fn as_slice(&self) -> &[u8] {
-      &bytemuck::cast_slice(&self.bytes)[..self.size]
-  }
+    /// Get the tables as a slice of bytes.
+    pub fn as_slice(&self) -> &[u8] {
+        &bytemuck::cast_slice(&self.bytes)[..self.size]
+    }
 
-  /// Get the tables a mutable slice of bytes.
-  pub fn as_mut_slice(&mut self) -> &mut [u8] {
-      &mut bytemuck::cast_slice_mut(&mut self.bytes)[..self.size]
-  }
+    /// Get the tables a mutable slice of bytes.
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        &mut bytemuck::cast_slice_mut(&mut self.bytes)[..self.size]
+    }
 
-  /// Get a view of the tables.
-  pub fn view(&self) -> ECDLPTablesFileView<'_> {
-      ECDLPTablesFileView::from_bytes(self.as_slice(), self.l1)
-  }
+    /// Get a view of the tables.
+    pub fn view(&self) -> ECDLPTablesFileView<'_> {
+        ECDLPTablesFileView::from_bytes(self.as_slice(), self.l1)
+    }
 }
 
 /// Builder for the ECDLP algorithm parameters.
 pub struct ECDLPArguments<R: ProgressReportFunction = NoopReportFn> {
-  range_start: i64,
-  range_end: i64,
-  pseudo_constant_time: bool,
-  n_threads: usize,
-  progress_report_function: R,
+    range_start: i64,
+    range_end: i64,
+    pseudo_constant_time: bool,
+    n_threads: usize,
+    progress_report_function: R,
 }
 
 impl ECDLPArguments<NoopReportFn> {
-  /// Creates a new `ECDLPArguments` with default arguments, to run on a specific range.
-  pub fn new_with_range(range_start: i64, range_end: i64) -> Self {
-      Self {
-          range_start,
-          range_end,
-          pseudo_constant_time: false,
-          progress_report_function: NoopReportFn,
-          n_threads: 1,
-      }
-  }
+    /// Creates a new `ECDLPArguments` with default arguments, to run on a specific range.
+    pub fn new_with_range(range_start: i64, range_end: i64) -> Self {
+        Self {
+            range_start,
+            range_end,
+            pseudo_constant_time: false,
+            progress_report_function: NoopReportFn,
+            n_threads: 1,
+        }
+    }
 }
 
 impl<F: ProgressReportFunction> ECDLPArguments<F> {
-  /// Enable the "pseudo constant-time" mode. This means that the algorithm will not stop
-  /// once it has found the answer. Keep in mind that **this is not actually constant-time**,
-  /// in fact, the algorithm cannot be constant-time because it relies on hashmap lookups.
-  /// This setting is also useful for benchmarking, as any input will result in roughly the same
-  /// execution time.
-  pub fn pseudo_constant_time(self, pseudo_constant_time: bool) -> Self {
-      Self {
-          pseudo_constant_time,
-          ..self
-      }
-  }
+    /// Enable the "pseudo constant-time" mode. This means that the algorithm will not stop
+    /// once it has found the answer. Keep in mind that **this is not actually constant-time**,
+    /// in fact, the algorithm cannot be constant-time because it relies on hashmap lookups.
+    /// This setting is also useful for benchmarking, as any input will result in roughly the same
+    /// execution time.
+    pub fn pseudo_constant_time(self, pseudo_constant_time: bool) -> Self {
+        Self {
+            pseudo_constant_time,
+            ..self
+        }
+    }
 
-  /// Sets the progress report function.
-  ///
-  /// This function will be periodically called when the algorithm is running.
-  /// The `progress` argument represents the current progress, from `0.0` to `1.0`.
-  /// Returning `ControlFlow::Break(())` will stop the algorithm.
-  ///
-  /// Please keep in mind that this report function should not take too long or nuke
-  /// the cache, as it would impact the performance of the algorithm.
-  ///
-  /// # Example
-  ///
-  /// ```no_run
-  /// use curve25519_dalek::ecdlp::ECDLPArguments;
-  /// use std::ops::ControlFlow;
-  /// 
-  /// let ecdlp_args = ECDLPArguments::new_with_range(0, 1 << 48)
-  ///     .progress_report_function(|_progress| {
-  ///         // do something with `progress`
-  ///         ControlFlow::Continue(())
-  ///     });
-  /// ```
-  pub fn progress_report_function<R: ProgressReportFunction>(
-      self,
-      progress_report_function: R,
-  ) -> ECDLPArguments<R> {
-      ECDLPArguments {
-          progress_report_function,
-          range_start: self.range_start,
-          range_end: self.range_end,
-          pseudo_constant_time: self.pseudo_constant_time,
-          n_threads: self.n_threads,
-      }
-  }
+    /// Sets the progress report function.
+    ///
+    /// This function will be periodically called when the algorithm is running.
+    /// The `progress` argument represents the current progress, from `0.0` to `1.0`.
+    /// Returning `ControlFlow::Break(())` will stop the algorithm.
+    ///
+    /// Please keep in mind that this report function should not take too long or nuke
+    /// the cache, as it would impact the performance of the algorithm.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use curve25519_dalek::ecdlp::ECDLPArguments;
+    /// use std::ops::ControlFlow;
+    /// 
+    /// let ecdlp_args = ECDLPArguments::new_with_range(0, 1 << 48)
+    ///     .progress_report_function(|_progress| {
+    ///         // do something with `progress`
+    ///         ControlFlow::Continue(())
+    ///     });
+    /// ```
+    pub fn progress_report_function<R: ProgressReportFunction>(
+        self,
+        progress_report_function: R,
+    ) -> ECDLPArguments<R> {
+        ECDLPArguments {
+            progress_report_function,
+            range_start: self.range_start,
+            range_end: self.range_end,
+            pseudo_constant_time: self.pseudo_constant_time,
+            n_threads: self.n_threads,
+        }
+    }
 
-  /// Configures the number of threads used.
-  /// This only affects the execution of the [`par_decode`] function.
-  ///
-  /// # Example
-  ///
-  /// ```
-  /// use curve25519_dalek::ecdlp::ECDLPArguments;
-  /// 
-  /// let n_threads = std::thread::available_parallelism()
-  ///     .expect("cannot get available parallelism")
-  ///     .get();
-  /// let ecdlp_args = ECDLPArguments::new_with_range(0, 1 << 48)
-  ///     .n_threads(n_threads);
-  /// ```
-  pub fn n_threads(self, n_threads: usize) -> Self {
-      Self { n_threads, ..self }
-  }
+    /// Configures the number of threads used.
+    /// This only affects the execution of the [`par_decode`] function.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use curve25519_dalek::ecdlp::ECDLPArguments;
+    /// 
+    /// let n_threads = std::thread::available_parallelism()
+    ///     .expect("cannot get available parallelism")
+    ///     .get();
+    /// let ecdlp_args = ECDLPArguments::new_with_range(0, 1 << 48)
+    ///     .n_threads(n_threads);
+    /// ```
+    pub fn n_threads(self, n_threads: usize) -> Self {
+        Self { n_threads, ..self }
+    }
 }
 
 /// Offset calculations common to [`par_decode`] and [`decode`].
@@ -389,9 +389,9 @@ fn make_point_iterator(
 /// This may take a long time, so if you are running on an event-loop such as `tokio`, you
 /// should wrap this in a `tokio::block_on` task.
 pub fn decode<R: ProgressReportFunction>(
-  precomputed_tables: &ECDLPTablesFileView<'_>,
-  point: RistrettoPoint,
-  args: ECDLPArguments<R>,
+    precomputed_tables: &ECDLPTablesFileView<'_>,
+    point: RistrettoPoint,
+    args: ECDLPArguments<R>,
 ) -> Option<i64> {
     let (offset, normalized, num_batches) = decode_prep(precomputed_tables, point, &args, 1, 0);
     let point_iter = make_point_iterator(precomputed_tables, normalized, num_batches);
@@ -410,9 +410,9 @@ pub fn decode<R: ProgressReportFunction>(
 /// This may take a long time, so if you are running on an event-loop such as `tokio`, you
 /// should wrap this in a `tokio::block_on` task.
 pub fn par_decode<R: ProgressReportFunction + Sync>(
-  precomputed_tables: &ECDLPTablesFileView<'_>,
-  point: RistrettoPoint,
-  args: ECDLPArguments<R>,
+    precomputed_tables: &ECDLPTablesFileView<'_>,
+    point: RistrettoPoint,
+    args: ECDLPArguments<R>,
 ) -> Option<i64> {
     let end_flag = AtomicBool::new(false);
 
@@ -424,19 +424,19 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
 
                 let end_flag = &end_flag;
 
-              let progress_report = &args.progress_report_function;
-              let progress_report = |progress| {
-                  if !args.pseudo_constant_time && end_flag.load(Ordering::SeqCst) {
-                      ControlFlow::Break(())
-                  } else {
-                      let ret = progress_report.report(progress);
-                      if ret.is_break() {
-                          // we need to tell the other threads that the user requested to stop
-                          end_flag.store(true, Ordering::SeqCst);
-                      }
-                      ret
-                  }
-              };
+                let progress_report = &args.progress_report_function;
+                let progress_report = |progress| {
+                    if !args.pseudo_constant_time && end_flag.load(Ordering::SeqCst) {
+                        ControlFlow::Break(())
+                    } else {
+                        let ret = progress_report.report(progress);
+                        if ret.is_break() {
+                            // we need to tell the other threads that the user requested to stop
+                            end_flag.store(true, Ordering::SeqCst);
+                        }
+                        ret
+                    }
+                };
 
                 let handle = s.spawn(move || {
                     let point_iter = make_point_iterator(
@@ -452,148 +452,148 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
                         progress_report,
                     );
 
-                  if !args.pseudo_constant_time && res.is_some() {
-                      end_flag.store(true, Ordering::SeqCst);
-                  }
+                    if !args.pseudo_constant_time && res.is_some() {
+                        end_flag.store(true, Ordering::SeqCst);
+                    }
 
-                  (res, offset)
-              });
+                    (res, offset)
+                });
 
-              handle
-          })
-          .collect::<Vec<_>>();
+                handle
+            })
+            .collect::<Vec<_>>();
 
-      let mut res = None;
-      for el in handles {
-          let v = el.join().expect("child thread panicked");
-          res = res.or(if v.0.is_some() {Some(v)} else {res});
-      }
+        let mut res = None;
+        for el in handles {
+            let v = el.join().expect("child thread panicked");
+            res = res.or(if v.0.is_some() {Some(v)} else {res});
+        }
 
-      res
-  });
+        res
+    });
 
-  res.map(|v| v.0.unwrap() as i64 + v.1)
+    res.map(|v| v.0.unwrap() as i64 + v.1)
 }
 
 fn fast_ecdlp(
-  precomputed_tables: &ECDLPTablesFileView<'_>,
-  target_point: RistrettoPoint,
-  point_iterator: impl Iterator<Item = (usize, usize, AffineMontgomeryPoint, f64)>,
-  pseudo_constant_time: bool,
-  progress_report: impl ProgressReportFunction,
+    precomputed_tables: &ECDLPTablesFileView<'_>,
+    target_point: RistrettoPoint,
+    point_iterator: impl Iterator<Item = (usize, usize, AffineMontgomeryPoint, f64)>,
+    pseudo_constant_time: bool,
+    progress_report: impl ProgressReportFunction,
 ) -> Option<u64> {
-  let t1_table = precomputed_tables.get_t1();
-  let t2_table = precomputed_tables.get_t2();
+    let t1_table = precomputed_tables.get_t1();
+    let t2_table = precomputed_tables.get_t2();
 
-  let mut found = None;
-  let mut consider_candidate = |m| {
-      let l1 = precomputed_tables.get_l1();
-      let derived_j_start = (m >> l1) as usize;  // Shift right by L1
-      if i64_to_scalar(m) * G == target_point {
-          found = found.or(Some(m as u64));
-          true
-      } else {
-          false
-      }
-  };
+    let mut found = None;
+    let mut consider_candidate = |m| {
+        let l1 = precomputed_tables.get_l1();
+        let derived_j_start = (m >> l1) as usize;  // Shift right by L1
+        if i64_to_scalar(m) * G == target_point {
+            found = found.or(Some(m as u64));
+            true
+        } else {
+            false
+        }
+    };
 
-  let mut batch = [FieldElement::ZERO; BATCH_SIZE];
-  'outer: for (index, j_start, target_montgomery, progress) in point_iterator {
-      // amortize the potential cost of the report function
-      if index % 256 == 0 {
-          if let ControlFlow::Break(_) = progress_report.report(progress) {
-              break 'outer;
-          }
-      }
+    let mut batch = [FieldElement::ZERO; BATCH_SIZE];
+    'outer: for (index, j_start, target_montgomery, progress) in point_iterator {
+        // amortize the potential cost of the report function
+        if index % 256 == 0 {
+            if let ControlFlow::Break(_) = progress_report.report(progress) {
+                break 'outer;
+            }
+        }
 
-      // Case 0: target is 0. Has to be handled separately.
-      if target_montgomery.is_identity_not_ct() {
-          consider_candidate((j_start as i64) << precomputed_tables.get_l1());
-          if !pseudo_constant_time {
-              break 'outer;
-          }
-      }
+        // Case 0: target is 0. Has to be handled separately.
+        if target_montgomery.is_identity_not_ct() {
+            consider_candidate((j_start as i64) << precomputed_tables.get_l1());
+            if !pseudo_constant_time {
+                break 'outer;
+            }
+        }
 
-      // Case 2: j=0. Has to be handled separately.
-      if t1_table
-          .lookup(&target_montgomery.u.as_bytes(), |i| {
-              consider_candidate(((j_start as i64) << precomputed_tables.get_l1()) + i as i64)
-                  || consider_candidate(((j_start as i64) << precomputed_tables.get_l1()) - i as i64)
-          })
-          .is_some() && !pseudo_constant_time {
-          break 'outer;
-      }
+        // Case 2: j=0. Has to be handled separately.
+        if t1_table
+            .lookup(&target_montgomery.u.as_bytes(), |i| {
+                consider_candidate(((j_start as i64) << precomputed_tables.get_l1()) + i as i64)
+                    || consider_candidate(((j_start as i64) << precomputed_tables.get_l1()) - i as i64)
+            })
+            .is_some() && !pseudo_constant_time {
+            break 'outer;
+        }
 
-      // Z = T2[j]_x - Pm_x
-      for (i, batch) in batch.iter_mut().enumerate() {
-          let j = i + 1;
-          let t2_point = t2_table.index(j as _);
-          let diff = &t2_point.u - &target_montgomery.u;
+        // Z = T2[j]_x - Pm_x
+        for (i, batch) in batch.iter_mut().enumerate() {
+            let j = i + 1;
+            let t2_point = t2_table.index(j as _);
+            let diff = &t2_point.u - &target_montgomery.u;
 
-          if diff == FieldElement::ZERO {
-              // Case 1: (Montgomery addition) exceptional case when T2[j] = Pm.
-              // m1 = j * 2^L1, m2 = -j * 2^L1
-              let found = consider_candidate((j_start as i64 + j as i64) << precomputed_tables.get_l1())
-                  || consider_candidate((j_start as i64 - j as i64) << precomputed_tables.get_l1());
-              if !pseudo_constant_time && found {
-                  break 'outer;
-              }
-          }
-          *batch = diff;
-      }
+            if diff == FieldElement::ZERO {
+                // Case 1: (Montgomery addition) exceptional case when T2[j] = Pm.
+                // m1 = j * 2^L1, m2 = -j * 2^L1
+                let found = consider_candidate((j_start as i64 + j as i64) << precomputed_tables.get_l1())
+                    || consider_candidate((j_start as i64 - j as i64) << precomputed_tables.get_l1());
+                if !pseudo_constant_time && found {
+                    break 'outer;
+                }
+            }
+            *batch = diff;
+        }
 
-      // nu = Z^-1
-      FieldElement::batch_invert(&mut batch);
+        // nu = Z^-1
+        FieldElement::batch_invert(&mut batch);
 
-      for (batch_i, nu) in batch.iter().enumerate() {
-          let j = batch_i + 1;
-          // Montgomery addition: general case
+        for (batch_i, nu) in batch.iter().enumerate() {
+            let j = batch_i + 1;
+            // Montgomery addition: general case
 
-          let t2_point = t2_table.index(j as _);
+            let t2_point = t2_table.index(j as _);
 
-          let alpha = &(&MONTGOMERY_A_NEG - &t2_point.u) - &target_montgomery.u;
+            let alpha = &(&MONTGOMERY_A_NEG - &t2_point.u) - &target_montgomery.u;
 
-          // lambda = (T2[j]_y - Pm_y) * nu
-          // Q_x = lambda^2 - A - T2[j]_x - Pm_x
-          let lambda = &(&t2_point.v - &target_montgomery.v) * nu;
-          let qx = &lambda.square() + &alpha;
+            // lambda = (T2[j]_y - Pm_y) * nu
+            // Q_x = lambda^2 - A - T2[j]_x - Pm_x
+            let lambda = &(&t2_point.v - &target_montgomery.v) * nu;
+            let qx = &lambda.square() + &alpha;
 
-          // Case 3: general case, negative j.
-          if t1_table
-              .lookup(&qx.as_bytes(), |i| {
-                  consider_candidate(((j_start as i64 - j as i64) << precomputed_tables.get_l1()) + i as i64)
-                      || consider_candidate(((j_start as i64 - j as i64) << precomputed_tables.get_l1()) - i as i64)
-              })
-              .is_some()
-          {
-              // m1 = -j * 2^L1 + i, m2 = -j * 2^L1 - i
-              if !pseudo_constant_time {
-                  break 'outer;
-              }
-          }
+            // Case 3: general case, negative j.
+            if t1_table
+                .lookup(&qx.as_bytes(), |i| {
+                    consider_candidate(((j_start as i64 - j as i64) << precomputed_tables.get_l1()) + i as i64)
+                        || consider_candidate(((j_start as i64 - j as i64) << precomputed_tables.get_l1()) - i as i64)
+                })
+                .is_some()
+            {
+                // m1 = -j * 2^L1 + i, m2 = -j * 2^L1 - i
+                if !pseudo_constant_time {
+                    break 'outer;
+                }
+            }
 
-          // lambda = (p - T2[j]_y - Pm_y) * nu
-          // Q_x = lambda^2 - A - T2[j]_x - Pm_x
-          let lambda = &(&-&t2_point.v - &target_montgomery.v) * nu;
-          let qx = &lambda.square() + &alpha;
+            // lambda = (p - T2[j]_y - Pm_y) * nu
+            // Q_x = lambda^2 - A - T2[j]_x - Pm_x
+            let lambda = &(&-&t2_point.v - &target_montgomery.v) * nu;
+            let qx = &lambda.square() + &alpha;
 
-          // Case 4: general case, positive j.
-          if t1_table
-              .lookup(&qx.as_bytes(), |i| {
-                  consider_candidate(((j_start as i64 + j as i64) << precomputed_tables.get_l1()) + i as i64)
-                      || consider_candidate(((j_start as i64 + j as i64) << precomputed_tables.get_l1()) - i as i64)
-              })
-              .is_some()
-          {
-              // m1 = j * 2^L1 + i, m2 = j * 2^L1 - i
-              if !pseudo_constant_time {
-                  break 'outer;
-              }
-          }
-      }
-  }
+            // Case 4: general case, positive j.
+            if t1_table
+                .lookup(&qx.as_bytes(), |i| {
+                    consider_candidate(((j_start as i64 + j as i64) << precomputed_tables.get_l1()) + i as i64)
+                        || consider_candidate(((j_start as i64 + j as i64) << precomputed_tables.get_l1()) - i as i64)
+                })
+                .is_some()
+            {
+                // m1 = j * 2^L1 + i, m2 = j * 2^L1 - i
+                if !pseudo_constant_time {
+                    break 'outer;
+                }
+            }
+        }
+    }
 
-  found
+    found
 }
 
 // FIXME(upstrean): should be an impl From<i64> for Scalar
