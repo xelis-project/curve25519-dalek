@@ -666,9 +666,9 @@ mod tests {
 
     #[test]
     fn test_ecdlp_par_decode() {
-        let base: u64 = (1<<48) / 4;
+        let base: u64 = (1<<48) / 16;
 
-        for i in 0..5 {
+        for i in 0..17 {
           let value = base * i;
           let tables = ECDLPTables::load_from_file(L1, "ecdlp_table.bin").unwrap();
           let view = tables.view();
