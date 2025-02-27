@@ -673,7 +673,7 @@ mod tests {
         let view = tables.view();
 
         let point = RistrettoPoint::mul_base(&Scalar::from(value));
-        let res = par_decode(&view, point, ECDLPArguments::new_with_range(0, 1 << 48).n_threads(16).pseudo_constant_time(true));
+        let res = par_decode(&view, point, ECDLPArguments::new_with_range(0, 1 << 48).n_threads(4).pseudo_constant_time(true));
         assert_eq!(res, Some(value as i64));
     }
 }
