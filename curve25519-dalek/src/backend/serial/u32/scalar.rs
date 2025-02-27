@@ -12,6 +12,9 @@
 
 use core::fmt::Debug;
 use core::ops::{Index, IndexMut};
+use cfg_if::cfg_if;
+
+#[cfg(feature = "scalar-constant-time")]
 use subtle::{Choice, ConditionallySelectable};
 
 #[cfg(feature = "zeroize")]
@@ -197,11 +200,20 @@ impl Scalar29 {
         }
 
         // conditionally add l if the difference is negative
+        #[cfg(not(feature = "scalar-constant-time"))]
+        let underflow_mask = ((borrow >> 31) ^ 1).wrapping_sub(1);
         let mut carry: u32 = 0;
         for i in 0..9 {
-            let underflow = Choice::from((borrow >> 31) as u8);
-            let addend = u32::conditional_select(&0, &constants::L[i], underflow);
-            carry = (carry >> 29) + difference[i] + addend;
+            cfg_if! {
+                if #[cfg(feature = "scalar-constant-time")] {
+                    let underflow = Choice::from((borrow >> 31) as u8);
+                    let addend = u32::conditional_select(&0, &constants::L[i], underflow);
+                    carry = (carry >> 29) + difference[i] + addend;
+                } else {
+                    carry = (carry >> 29) + difference[i] + (constants::L[i] & underflow_mask);
+                }
+            }
+
             difference[i] = carry & mask;
         }
 
