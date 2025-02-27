@@ -52,39 +52,39 @@
 
 // Notes of the ECDLP implementation.
 mod ecdlp_notes {
-  //! The algorithm implemented here is BSGS (Baby Step Giant Step), and the implementation
-  //! details are based on [Solving Small Exponential ECDLP in EC-based Additively Homomorphic Encryption and Applications][fast-ecdlp-paper].
-  //!
-  //! The gist of BSGS goes as follows:
-  //! - Our target point, which we want to decode, represents an integer in the range \[0, 2^(L1 + L2)\].
-  //! - We have a T1 hash table, where the key is the curve point and value is the decoded
-  //!   point. T1 = <i * G => i | i in \[1, 2^l1\]>
-  //! - We have a T2 linear table (an array), where T2 = \[j * 2^l1 * G | j in \[1, 2^l2\]\]
-  //! - For each j in 0..2^l2
-  //!     Compute the difference between T2\[j\] and the target point
-  //!     if let Some(i) = T1.get(the difference) => the decoded integer is j * 2^L1 + i.
-  //!
-  //! On top of this regular BSGS algorithm, we add the following optimizations:
-  //! - Batching. The paper uses a tree-based Montgomery trick - instead, we use the batched
-  //!   inversion which is implemented in FieldElement.
-  //! - T1 only contains the truncated x coordinates. The table uses Cuckoo hashing, and
-  //!   the hash of a point is directly just a subset of the bytes of the point.
-  //! - We need a canonical encoding of a point before any hashmap lookup: this means that
-  //!   we must work with affine coordinates. Addition of affine Montgomery points requires
-  //!   less inversions than Edwards points, so we use that instead.  
-  //! - Using the fact -(x, y) = (x, -y) on the Montgomery curve, we can shift the inputs so
-  //!   that we only need half of T1 and T2 and half of the modular inversions.
-  //! - The L2 constant has been fixed here, because we can just shift the input after every
-  //!   batch. This means that L2 has a constant size of about 16Ko, which is preferable
-  //!   to >100Mo when L2 = 22, for example. This results in slightly more modular inversions,
-  //!   however this has no visible impact on performance. Shifting the inputs like this
-  //!   also means that we support arbitrary decoding ranges for a given constant tables file.
-  //!
-  //! Note: We are dealing with a curve which has cofactors; as such, we need to multiply
-  //! by the cofactor before running ECDLP to clear it and guarantee a canonical encoding of our points.
-  //! The tables also need to be based on `num * cofactor` to match.
-  //!
-  //! [fast-ecdlp-paper]: https://eprint.iacr.org/2022/1573
+    //! The algorithm implemented here is BSGS (Baby Step Giant Step), and the implementation
+    //! details are based on [Solving Small Exponential ECDLP in EC-based Additively Homomorphic Encryption and Applications][fast-ecdlp-paper].
+    //!
+    //! The gist of BSGS goes as follows:
+    //! - Our target point, which we want to decode, represents an integer in the range \[0, 2^(L1 + L2)\].
+    //! - We have a T1 hash table, where the key is the curve point and value is the decoded
+    //!   point. T1 = <i * G => i | i in \[1, 2^l1\]>
+    //! - We have a T2 linear table (an array), where T2 = \[j * 2^l1 * G | j in \[1, 2^l2\]\]
+    //! - For each j in 0..2^l2
+    //!     Compute the difference between T2\[j\] and the target point
+    //!     if let Some(i) = T1.get(the difference) => the decoded integer is j * 2^L1 + i.
+    //!
+    //! On top of this regular BSGS algorithm, we add the following optimizations:
+    //! - Batching. The paper uses a tree-based Montgomery trick - instead, we use the batched
+    //!   inversion which is implemented in FieldElement.
+    //! - T1 only contains the truncated x coordinates. The table uses Cuckoo hashing, and
+    //!   the hash of a point is directly just a subset of the bytes of the point.
+    //! - We need a canonical encoding of a point before any hashmap lookup: this means that
+    //!   we must work with affine coordinates. Addition of affine Montgomery points requires
+    //!   less inversions than Edwards points, so we use that instead.  
+    //! - Using the fact -(x, y) = (x, -y) on the Montgomery curve, we can shift the inputs so
+    //!   that we only need half of T1 and T2 and half of the modular inversions.
+    //! - The L2 constant has been fixed here, because we can just shift the input after every
+    //!   batch. This means that L2 has a constant size of about 16Ko, which is preferable
+    //!   to >100Mo when L2 = 22, for example. This results in slightly more modular inversions,
+    //!   however this has no visible impact on performance. Shifting the inputs like this
+    //!   also means that we support arbitrary decoding ranges for a given constant tables file.
+    //!
+    //! Note: We are dealing with a curve which has cofactors; as such, we need to multiply
+    //! by the cofactor before running ECDLP to clear it and guarantee a canonical encoding of our points.
+    //! The tables also need to be based on `num * cofactor` to match.
+    //!
+    //! [fast-ecdlp-paper]: https://eprint.iacr.org/2022/1573
 }
 
 mod affine_montgomery;
