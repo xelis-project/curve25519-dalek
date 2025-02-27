@@ -667,13 +667,16 @@ mod tests {
 
     #[test]
     fn test_ecdlp_par_decode() {
-        let value: u64 = 1<<48;
+        let base: u64 = (1<<48) / 4;
 
-        let tables = ECDLPTables::load_from_file(L1, "ecdlp_table.bin").unwrap();
-        let view = tables.view();
-
-        let point = RistrettoPoint::mul_base(&Scalar::from(value));
-        let res = par_decode(&view, point, ECDLPArguments::new_with_range(0, 1 << 48).n_threads(4).pseudo_constant_time(true));
-        assert_eq!(res, Some(value as i64));
+        for i in 0..5 {
+          let value = base * i;
+          let tables = ECDLPTables::load_from_file(L1, "ecdlp_table.bin").unwrap();
+          let view = tables.view();
+  
+          let point = RistrettoPoint::mul_base(&Scalar::from(value));
+          let res = par_decode(&view, point, ECDLPArguments::new_with_range(0, 1 << 48).n_threads(4).pseudo_constant_time(true));
+          assert_eq!(res, Some(value as i64));
+        }
     }
 }
