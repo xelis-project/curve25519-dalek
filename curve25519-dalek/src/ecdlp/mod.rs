@@ -485,7 +485,6 @@ fn fast_ecdlp(
 
     let mut found = None;
     let mut consider_candidate = |m| {
-        let l1 = precomputed_tables.get_l1();
         if i64_to_scalar(m) * G == target_point {
             found = found.or(Some(m as u64));
             true
