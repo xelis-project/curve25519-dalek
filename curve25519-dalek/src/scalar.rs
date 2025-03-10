@@ -282,6 +282,18 @@ impl Scalar {
 
         s
     }
+
+    /// Subtract another scalar from this scalar, returning the result.
+    /// This is equivalent to `self - rhs` but without constant time part.
+    pub fn vartime_sub(&self, rhs: &Scalar) -> Scalar {
+        UnpackedScalar::vartime_sub(&self.unpack(), &rhs.unpack()).pack()
+    }
+
+    /// Subtract another scalar from this scalar, returning the result.
+    /// This is equivalent to `self - rhs` but without constant time part.
+    pub fn vartime_add(&self, rhs: &Scalar) -> Scalar {
+        UnpackedScalar::vartime_add(&self.unpack(), &rhs.unpack()).pack()
+    }
 }
 
 impl Debug for Scalar {

@@ -13,9 +13,7 @@
 
 use core::fmt::Debug;
 use core::ops::{Index, IndexMut};
-use cfg_if::cfg_if;
 
-#[cfg(feature = "scalar-constant-time")]
 use subtle::{Choice, ConditionallySelectable};
 
 #[cfg(feature = "zeroize")]
@@ -189,20 +187,51 @@ impl Scalar52 {
         }
 
         // conditionally add l if the difference is negative
-        #[cfg(not(feature = "scalar-constant-time"))]
+        let mut carry: u64 = 0;
+        for i in 0..5 {
+            let underflow = Choice::from((borrow >> 63) as u8);
+            let addend = u64::conditional_select(&0, &constants::L[i], underflow);
+            carry = (carry >> 52) + difference[i] + addend;
+
+            difference[i] = carry & mask;
+        }
+
+        difference
+    }
+
+    /// Compute `a + b` (mod l) in var-time
+    pub fn vartime_add(a: &Scalar52, b: &Scalar52) -> Scalar52 {
+        let mut sum = Scalar52::ZERO;
+        let mask = (1u64 << 52) - 1;
+
+        // a + b
+        let mut carry: u64 = 0;
+        for i in 0..5 {
+            carry = a[i] + b[i] + (carry >> 52);
+            sum[i] = carry & mask;
+        }
+
+        // subtract l if the sum is >= l
+        Scalar52::vartime_sub(&sum, &constants::L)
+    }
+
+    /// Compute `a - b` (mod l)
+    pub fn vartime_sub(a: &Scalar52, b: &Scalar52) -> Scalar52 {
+        let mut difference = Scalar52::ZERO;
+        let mask = (1u64 << 52) - 1;
+
+        // a - b
+        let mut borrow: u64 = 0;
+        for i in 0..5 {
+            borrow = a[i].wrapping_sub(b[i] + (borrow >> 63));
+            difference[i] = borrow & mask;
+        }
+
+        // conditionally add l if the difference is negative
         let underflow_mask = ((borrow >> 63) ^ 1).wrapping_sub(1);
         let mut carry: u64 = 0;
         for i in 0..5 {
-            cfg_if! {
-                if #[cfg(feature = "scalar-constant-time")] {
-                    let underflow = Choice::from((borrow >> 63) as u8);
-                    let addend = u64::conditional_select(&0, &constants::L[i], underflow);
-                    carry = (carry >> 52) + difference[i] + addend;
-                } else {
-                    carry = (carry >> 52) + difference[i] + (constants::L[i] & underflow_mask);
-                }
-            }
-
+            carry = (carry >> 52) + difference[i] + (constants::L[i] & underflow_mask);
             difference[i] = carry & mask;
         }
 
