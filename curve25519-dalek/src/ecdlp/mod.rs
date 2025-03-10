@@ -317,21 +317,37 @@ fn decode_prep<R: ProgressReportFunction>(
     precomputed_tables: &ECDLPTablesFileView<'_>,
     point: RistrettoPoint,
     args: &ECDLPArguments<R>,
-    _n_threads: usize,
+    n_threads: usize,
+    thread_i: usize,  // Add thread_i parameter
 ) -> (i64, RistrettoPoint, usize) {
     let amplitude = (args.range_end - args.range_start).max(0);
 
     let offset = args.range_start + ((1 << (L2 - 1)) << precomputed_tables.get_l1()) + (1 << (precomputed_tables.get_l1() - 1));
-    let normalized = &point - RistrettoPoint::mul_base(&i64_to_scalar(offset));
+    
+    // Calculate thread-specific offset adjustment
+    let thread_scalar_offset = if n_threads > 1 {
+        // Divide the range into n_threads parts and adjust offset for this thread
+        (amplitude / n_threads as i64) * thread_i as i64
+    } else {
+        0
+    };
+    
+    // Adjust the normalized point for this specific thread
+    let normalized = &point - RistrettoPoint::mul_base(&i64_to_scalar(offset + thread_scalar_offset));
 
-    let j_end = (amplitude >> precomputed_tables.get_l1()) as usize; // amplitude / 2^(L1 + 1)
-
-    // FIXME: is there a better way to divceil other than pulling the `num` crate?
+    let j_end = (amplitude >> precomputed_tables.get_l1()) as usize;
     let divceil = |a, b| (a + b - 1) / b;
+    
+    // Calculate appropriate num_batches for this thread
+    let thread_j_end = if n_threads > 1 {
+        j_end / n_threads
+    } else {
+        j_end
+    };
+    
+    let num_batches = divceil(thread_j_end, 1 << L2);
 
-    let num_batches = divceil(j_end, 1 << L2); // divceil(j_end, 2^NEW_L2)
-
-    (offset, normalized, num_batches)
+    (offset + thread_scalar_offset, normalized, num_batches)
 }
 
 /// Returns an iterator of batches for a given thread. Common to [`par_decode`] and [`decode`].
@@ -340,10 +356,8 @@ fn make_point_iterator(
     precomputed_tables: &ECDLPTablesFileView<'_>,
     normalized: RistrettoPoint,
     num_batches: usize,
-    n_threads: usize,
-    thread_i: usize,
 ) -> impl Iterator<Item = (usize, usize, AffineMontgomeryPoint, f64)> {
-    let batch_iterator = (0..num_batches).map(move |j| {
+    let thread_iter = (0..num_batches).map(move |j| {
         let progress = j as f64 / num_batches as f64;
         (j, j * (1 << L2), progress)
     });
@@ -351,15 +365,11 @@ fn make_point_iterator(
     // clear the cofactor, we want the repr to be canonical
     let normalized = RistrettoPoint(normalized.0.mul_by_cofactor());
 
-    let thread_iter = batch_iterator.skip(thread_i).step_by(n_threads);
-
     let els_per_batch: u64 = 1u64 << (L2 + precomputed_tables.get_l1());
 
     // starting point for this thread
-    let t_normalized = &normalized - &i64_to_scalar((thread_i as u64 * els_per_batch) as i64) * G;
-
-    let mut target_montgomery = AffineMontgomeryPoint::from(&t_normalized.0);
-    let batch_step = -(n_threads as i64) * els_per_batch as i64;
+    let mut target_montgomery = AffineMontgomeryPoint::from(&normalized.0);
+    let batch_step = -(els_per_batch as i64);
     let batch_step_montgomery =
         AffineMontgomeryPoint::from(&(i64_to_scalar(batch_step) * G).0.mul_by_cofactor());
 
@@ -381,8 +391,8 @@ pub fn decode<R: ProgressReportFunction>(
     point: RistrettoPoint,
     args: ECDLPArguments<R>,
 ) -> Option<i64> {
-    let (offset, normalized, num_batches) = decode_prep(precomputed_tables, point, &args, 1);
-    let point_iter = make_point_iterator(precomputed_tables, normalized, num_batches, 1, 0);
+    let (offset, normalized, num_batches) = decode_prep(precomputed_tables, point, &args, 1, 0);
+    let point_iter = make_point_iterator(precomputed_tables, normalized, num_batches);
     fast_ecdlp(
         precomputed_tables,
         normalized,
@@ -403,12 +413,13 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
     args: ECDLPArguments<R>,
 ) -> Option<i64> {
     let end_flag = AtomicBool::new(false);
-    let (offset, normalized, num_batches) =
-        decode_prep(precomputed_tables, point, &args, args.n_threads);
 
     let res = std::thread::scope(|s| {
         let handles = (0..args.n_threads)
             .map(|thread_i| {
+                let (offset, normalized, num_batches) =
+                  decode_prep(precomputed_tables, point, &args, args.n_threads, thread_i);
+
                 let end_flag = &end_flag;
 
                 let progress_report = &args.progress_report_function;
@@ -430,8 +441,6 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
                         precomputed_tables,
                         normalized,
                         num_batches,
-                        args.n_threads,
-                        thread_i,
                     );
                     let res = fast_ecdlp(
                         precomputed_tables,
@@ -445,7 +454,7 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
                         end_flag.store(true, Ordering::SeqCst);
                     }
 
-                    res
+                    res.map(|v| offset + v as i64)
                 });
 
                 handle
@@ -461,7 +470,7 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
         res
     });
 
-    res.map(|v| v as i64 + offset)
+    res
 }
 
 fn fast_ecdlp(
@@ -476,6 +485,7 @@ fn fast_ecdlp(
 
     let mut found = None;
     let mut consider_candidate = |m| {
+        let l1 = precomputed_tables.get_l1();
         if i64_to_scalar(m) * G == target_point {
             found = found.or(Some(m as u64));
             true
@@ -656,13 +666,16 @@ mod tests {
 
     #[test]
     fn test_ecdlp_par_decode() {
-        let value: u64 = 1<<48;
+        let base: u64 = (1<<48) / 16;
 
-        let tables = ECDLPTables::load_from_file(L1, "ecdlp_table.bin").unwrap();
-        let view = tables.view();
-
-        let point = RistrettoPoint::mul_base(&Scalar::from(value));
-        let res = par_decode(&view, point, ECDLPArguments::new_with_range(0, 1 << 48).n_threads(1).pseudo_constant_time(true));
-        assert_eq!(res, Some(value as i64));
+        for i in 0..17 {
+          let value = base * i;
+          let tables = ECDLPTables::load_from_file(L1, "ecdlp_table.bin").unwrap();
+          let view = tables.view();
+  
+          let point = RistrettoPoint::mul_base(&Scalar::from(value));
+          let res = par_decode(&view, point, ECDLPArguments::new_with_range(0, 1 << 48).n_threads(4).pseudo_constant_time(true));
+          assert_eq!(res, Some(value as i64));
+        }
     }
 }
