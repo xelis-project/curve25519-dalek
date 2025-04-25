@@ -170,10 +170,26 @@ impl ECDLPTables {
         Ok(zelf)
     }
 
+    /// Generate a new precomputed tables, with multithreading
+    pub fn generate_par(l1: usize, n_threads: usize) -> std::io::Result<Self> {
+        let mut zelf = Self::empty(l1);
+        table_generation::create_table_file_par(l1, n_threads, zelf.as_mut_slice())?;
+
+        Ok(zelf)
+    }
+
     /// Generate a new precomputed tables with a progress report function.
     pub fn generate_with_progress_report<P: ProgressTableGenerationReportFunction>(l1: usize, p: P) -> std::io::Result<Self> {
         let mut zelf = Self::empty(l1);
         table_generation::create_table_file_with_progress_report(l1, zelf.as_mut_slice(), p)?;
+
+        Ok(zelf)
+    }
+
+    /// Generate a new precomputed tables with a progress report function, with multithreading.
+    pub fn generate_with_progress_report_par<P: ProgressTableGenerationReportFunction + Sync>(l1: usize, n_threads: usize, p: P) -> std::io::Result<Self> {
+        let mut zelf = Self::empty(l1);
+        table_generation::create_table_file_with_progress_report_par(l1, n_threads, zelf.as_mut_slice(), p)?;
 
         Ok(zelf)
     }
@@ -686,5 +702,24 @@ mod tests {
           let res = par_decode(&view, point, ECDLPArguments::new_with_range(0, 1 << 48).n_threads(4).pseudo_constant_time(true));
           assert_eq!(res, Some(value as i64));
         }
+    }
+
+    #[test]
+    fn test_table_par() {
+        use std::time::Instant;
+        
+        // Measure parallel generation time
+        let start = Instant::now();
+        let tables_par = ECDLPTables::generate_par(18, std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8)).unwrap();
+        let par_duration = start.elapsed();
+
+        // Measure sequential generation time
+        let start = Instant::now();
+        let tables_seq = ECDLPTables::generate(18).unwrap();
+        let seq_duration = start.elapsed();
+        
+        // Verify both tables are identical
+        assert_eq!(tables_seq.as_slice(), tables_par.as_slice(), 
+                   "Sequential and parallel generated tables should be identical");
     }
 }
