@@ -81,8 +81,9 @@ to build out more elaborate abstractions it starts to become painful to use.
 This crate exposes an `#[unsafe_target_feature]` macro which works just like `#[target_feature]` except
 it moves the `unsafe` from the function prototype into the macro name, and can be used on safe functions.
 
-```rust,compile_fail
+```rust
 // ERROR: `#[target_feature(..)]` can only be applied to `unsafe` functions
+// on versions < 1.86.0
 #[target_feature(enable = "avx2")]
 fn func() {}
 ```

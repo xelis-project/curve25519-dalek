@@ -292,6 +292,8 @@ fn process_function(
     function: syn::ItemFn,
     outer: Option<(syn::Generics, Box<syn::Type>)>,
 ) -> TokenStream {
+    // Only versions below 1.86.0 must ensure that the function is
+    // marked as unsafe when using `target_feature`
     if function.sig.unsafety.is_some() {
         return quote::quote! {
             #[target_feature(enable = #attributes)]

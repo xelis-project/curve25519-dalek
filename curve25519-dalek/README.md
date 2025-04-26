@@ -188,6 +188,7 @@ for MSRV and public API.
 
 | Releases | MSRV   |
 | :---     |:-------|
+| 5.x      | 1.80.0 |
 | 4.x      | 1.60.0 |
 | 3.x      | 1.41.0 |
 
