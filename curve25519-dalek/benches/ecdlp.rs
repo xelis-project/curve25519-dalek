@@ -5,8 +5,7 @@ use curve25519_dalek::{
     Scalar,
 };
 use rand::Rng;
-use std::path::Path;
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
 pub fn ecdlp_bench(c: &mut Criterion) {
     if !Path::new("ecdlp_table.bin").exists() {
@@ -189,9 +188,10 @@ fn bench_table_generation(c: &mut Criterion) {
     let mut group = c.benchmark_group("Table Generation");
 
     // Configure the benchmark for faster execution
-    group.sample_size(10); // Reduce to minimum samples
-    group.measurement_time(std::time::Duration::from_secs(5)); // Less measurement time
-    group.warm_up_time(std::time::Duration::from_secs(1)); // Less warmup time
+    // Reduce to minimum samples
+    group.sample_size(10);
+    // Less measurement time
+    group.measurement_time(Duration::from_secs(5));
 
     let n_threads = std::thread::available_parallelism()
         .map(|n| n.get())
