@@ -2,8 +2,11 @@
 //! unstable. The API may change without notice.
 
 use bytemuck::{Pod, Zeroable};
-use std::mem::size_of;
-use std::ops::ControlFlow;
+use std::{
+    mem::size_of,
+    ops::ControlFlow,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use crate::constants::RISTRETTO_BASEPOINT_POINT;
 use crate::field::FieldElement;
@@ -181,8 +184,8 @@ impl<F: Fn(f64, ReportStep) -> ControlFlow<()>> ProgressTableGenerationReportFun
 pub mod table_generation {
     //! Generate the precomputed tables.
 
-    use std::thread;
     use super::*;
+    use std::thread;
 
     fn t1_cuckoo_setup<P: ProgressTableGenerationReportFunction>(
         cuckoo_len: usize,
@@ -332,8 +335,6 @@ pub mod table_generation {
         dest: &mut [u8],
         progress_report: &P,
     ) -> std::io::Result<()> {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
         let j_max = 1 << (l1 - 1);
         let cuckoo_len = (j_max as u64 * 30 / 100) as usize + j_max;
 
@@ -345,7 +346,7 @@ pub mod table_generation {
         let mut all_entries = Vec::new();
 
         // Calculate chunks
-        let chunk_size = (j_max + 1 + n_threads - 1) / n_threads; // ceiling division
+        let chunk_size = (j_max + 1).div_ceil(n_threads); // ceiling division
 
         thread::scope(|s| {
             let handles = (0..n_threads)
@@ -430,12 +431,10 @@ pub mod table_generation {
         dest: &mut [u8],
         progress_report: &P,
     ) -> std::io::Result<()> {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
         let two_to_l1 = EdwardsPoint::mul_base(&Scalar::from(1u32 << l1)).mul_by_cofactor();
         let two_to_l1_affine = AffineMontgomeryPoint::from(&two_to_l1);
 
-        let arr: &mut [T2MontgomeryCoordinates] = bytemuck::cast_slice_mut(dest);
+        let coordinates: &mut [T2MontgomeryCoordinates] = bytemuck::cast_slice_mut(dest);
 
         let progress_counter = AtomicUsize::new(0);
         let total_points = I_MAX - 1;
@@ -446,52 +445,51 @@ pub mod table_generation {
 
         thread::scope(|s| {
             // Split the array into chunks for each thread
-            let arr_chunks: Vec<&mut [T2MontgomeryCoordinates]> =
-                arr.chunks_mut(chunk_size).collect();
+            let arr_chunks = coordinates.chunks_mut(chunk_size);
 
-            let mut handles = Vec::new();
+            let handles = arr_chunks
+                .enumerate()
+                .filter_map(|(thread_i, chunk)| {
+                    let start_offset = thread_i * chunk_size + 1; // 1-indexed
+                    let end_offset = ((thread_i + 1) * chunk_size + 1).min(I_MAX);
 
-            for (thread_i, chunk) in arr_chunks.into_iter().enumerate() {
-                let start_offset = thread_i * chunk_size + 1; // 1-indexed
-                let end_offset = std::cmp::min((thread_i + 1) * chunk_size + 1, I_MAX);
+                    if start_offset >= end_offset {
+                        return None;
+                    }
 
-                if start_offset >= end_offset {
-                    continue;
-                }
+                    let progress_counter = &progress_counter;
 
-                let progress_counter = &progress_counter;
+                    Some(s.spawn(move || {
+                        // Calculate starting point: start_offset * two_to_l1
+                        let scalar = Scalar::from(start_offset as u64);
+                        let start_point =
+                            EdwardsPoint::mul_base(&(scalar * Scalar::from(1u32 << l1)))
+                                .mul_by_cofactor();
+                        let mut acc = AffineMontgomeryPoint::from(&start_point);
 
-                handles.push(s.spawn(move || {
-                    // Calculate starting point: start_offset * two_to_l1
-                    let scalar = Scalar::from(start_offset as u64);
-                    let start_point = EdwardsPoint::mul_base(&(scalar * Scalar::from(1u32 << l1)))
-                        .mul_by_cofactor();
-                    let mut acc = AffineMontgomeryPoint::from(&start_point);
-
-                    for j in start_offset..end_offset {
-                        // Access the chunk relative to its beginning
-                        let chunk_idx = j - start_offset;
-                        if chunk_idx < chunk.len() {
+                        for j in start_offset..end_offset {
+                            // Access the chunk relative to its beginning
+                            let chunk_idx = j - start_offset;
                             chunk[chunk_idx] = acc.into();
-                        }
 
-                        if (j - 1) % report_every == 0 {
-                            let old_count = progress_counter.fetch_add(1, Ordering::Relaxed);
-                            if old_count % 10 == 0 {
-                                let progress =
-                                    (old_count * report_every) as f64 / total_points as f64;
-                                if let ControlFlow::Break(_) =
-                                    progress_report.report(progress, ReportStep::T2Table)
-                                {
-                                    // Can't easily interrupt from inside thread
+                            if (j - 1) % report_every == 0 {
+                                let old_count = progress_counter.fetch_add(1, Ordering::Relaxed);
+                                if old_count % 10 == 0 {
+                                    let progress =
+                                        (old_count * report_every) as f64 / total_points as f64;
+                                    if let ControlFlow::Break(_) =
+                                        progress_report.report(progress, ReportStep::T2Table)
+                                    {
+                                        // Can't easily interrupt from inside thread
+                                    }
                                 }
                             }
-                        }
 
-                        acc = acc.addition_not_ct(&two_to_l1_affine);
-                    }
-                }));
-            }
+                            acc = acc.addition_not_ct(&two_to_l1_affine);
+                        }
+                    }))
+                })
+                .collect::<Vec<_>>();
 
             // Wait for all threads
             for handle in handles {
