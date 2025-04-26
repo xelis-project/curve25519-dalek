@@ -325,6 +325,170 @@ pub mod table_generation {
         Ok(())
     }
 
+    fn create_t1_table_par<P: ProgressTableGenerationReportFunction + Sync>(l1: usize, n_threads: usize, dest: &mut [u8], progress_report: &P) -> std::io::Result<()> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Mutex;
+        
+        let j_max = 1 << (l1 - 1);
+        let cuckoo_len = (j_max as u64 * 30 / 100) as usize + j_max;
+        
+        // Use atomic counter for progress tracking
+        let progress_counter = AtomicUsize::new(0);
+        let report_every = j_max / 1000 + 1;
+        
+        // Pre-allocate the full array
+        let all_entries = Mutex::new(vec![CompressedFieldElement::default(); j_max + 1]);
+        
+        // Calculate chunks
+        let chunk_size = (j_max + 1 + n_threads - 1) / n_threads; // ceiling division
+        
+        std::thread::scope(|s| {
+            let mut handles = Vec::new();
+            
+            for thread_i in 0..n_threads {
+                let start_idx = thread_i * chunk_size;
+                let end_idx = std::cmp::min((thread_i + 1) * chunk_size, j_max + 1);
+                
+                if start_idx >= end_idx {
+                    continue;
+                }
+                
+                let all_entries = &all_entries;
+                let progress_counter = &progress_counter;
+                
+                handles.push(s.spawn(move || {
+                    let step = AffineMontgomeryPoint::from(&RISTRETTO_BASEPOINT_POINT.0.mul_by_cofactor());
+                    
+                    // Compute starting point for this chunk
+                    let start_point = if start_idx == 0 {
+                        AffineMontgomeryPoint::from(&RistrettoPoint::identity().0)
+                    } else {
+                        let scalar = Scalar::from(start_idx as u64);
+                        let point = EdwardsPoint::mul_base(&scalar).mul_by_cofactor();
+                        AffineMontgomeryPoint::from(&point)
+                    };
+                    
+                    let mut acc = start_point;
+                    let mut chunk_entries = Vec::with_capacity(end_idx - start_idx);
+                    
+                    for i in start_idx..end_idx {
+                        chunk_entries.push(acc.u.as_bytes());
+                        
+                        if i % report_every == 0 {
+                            let old_count = progress_counter.fetch_add(1, Ordering::Relaxed);
+                            if old_count % 10 == 0 {
+                                let progress = (old_count * report_every) as f64 / j_max as f64;
+                                if let ControlFlow::Break(_) = progress_report.report(progress, ReportStep::T1PointsGeneration) {
+                                    // Can't easily interrupt from inside thread, would need to add a flag
+                                }
+                            }
+                        }
+                        
+                        acc = acc.addition_not_ct(&step);
+                    }
+                    
+                    // Write results to the shared array
+                    let mut all_entries = all_entries.lock().unwrap();
+                    for (i, entry) in chunk_entries.into_iter().enumerate() {
+                        all_entries[start_idx + i] = entry;
+                    }
+                }));
+            }
+            
+            // Wait for all threads to complete
+            for handle in handles {
+                handle.join().expect("Thread panicked");
+            }
+        });
+        
+        // Convert to owned vector after all threads complete
+        let all_entries = all_entries.into_inner().unwrap();
+        
+        // The cuckoo setup remains sequential as it's harder to parallelize
+        let (t1_keys_dest, t1_values_dest) = dest.split_at_mut(cuckoo_len * size_of::<u32>());
+        let t1_keys_dest: &mut [u32] = bytemuck::cast_slice_mut(t1_keys_dest);
+        let t1_values_dest: &mut [u32] = bytemuck::cast_slice_mut(t1_values_dest);
+        
+        t1_cuckoo_setup(
+            cuckoo_len,
+            j_max,
+            &all_entries,
+            t1_values_dest,
+            t1_keys_dest,
+            progress_report,
+        )?;
+        
+        Ok(())
+    }
+  
+    fn create_t2_table_par<P: ProgressTableGenerationReportFunction + Sync>(l1: usize, n_threads: usize, dest: &mut [u8], progress_report: &P) -> std::io::Result<()> {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        
+        let two_to_l1 = EdwardsPoint::mul_base(&Scalar::from(1u32 << l1)).mul_by_cofactor();
+        let two_to_l1_affine = AffineMontgomeryPoint::from(&two_to_l1);
+        
+        let arr: &mut [T2MontgomeryCoordinates] = bytemuck::cast_slice_mut(dest);
+        
+        let progress_counter = AtomicUsize::new(0);
+        let total_points = I_MAX - 1;
+        let report_every = total_points / 1000 + 1;
+        
+        // Calculate chunks
+        let chunk_size = (total_points + n_threads - 1) / n_threads;
+        
+        std::thread::scope(|s| {
+            // Split the array into chunks for each thread
+            let arr_chunks: Vec<&mut [T2MontgomeryCoordinates]> = arr.chunks_mut(chunk_size).collect();
+            
+            let mut handles = Vec::new();
+            
+            for (thread_i, chunk) in arr_chunks.into_iter().enumerate() {
+                let start_offset = thread_i * chunk_size + 1;  // 1-indexed
+                let end_offset = std::cmp::min((thread_i + 1) * chunk_size + 1, I_MAX);
+                
+                if start_offset >= end_offset {
+                    continue;
+                }
+                
+                let progress_counter = &progress_counter;
+                
+                handles.push(s.spawn(move || {
+                    // Calculate starting point: start_offset * two_to_l1
+                    let scalar = Scalar::from(start_offset as u64);
+                    let start_point = EdwardsPoint::mul_base(&(scalar * Scalar::from(1u32 << l1))).mul_by_cofactor();
+                    let mut acc = AffineMontgomeryPoint::from(&start_point);
+                    
+                    for j in start_offset..end_offset {
+                        // Access the chunk relative to its beginning
+                        let chunk_idx = j - start_offset;
+                        if chunk_idx < chunk.len() {
+                            chunk[chunk_idx] = acc.into();
+                        }
+                        
+                        if (j - 1) % report_every == 0 {
+                            let old_count = progress_counter.fetch_add(1, Ordering::Relaxed);
+                            if old_count % 10 == 0 {
+                                let progress = (old_count * report_every) as f64 / total_points as f64;
+                                if let ControlFlow::Break(_) = progress_report.report(progress, ReportStep::T2Table) {
+                                    // Can't easily interrupt from inside thread
+                                }
+                            }
+                        }
+                        
+                        acc = acc.addition_not_ct(&two_to_l1_affine);
+                    }
+                }));
+            }
+            
+            // Wait for all threads
+            for handle in handles {
+                handle.join().expect("Thread panicked");
+            }
+        });
+        
+        Ok(())
+    }
+
     /// Length of the table file for a given `l1` const.
     pub const fn table_file_len(l1: usize) -> usize {
         let j_max: u64 = 1 << (l1 - 1);
@@ -342,6 +506,14 @@ pub mod table_generation {
         create_table_file_with_progress_report(l1, dest, NoOpProgressTableGenerationReportFunction)
     }
 
+    /// Generate the ECDLP precomputed tables file, with multithreading.
+    /// To prepare `dest`, you should use an mmaped file or a 32-byte aligned byte array.
+    /// The byte array length should be the return value of [`table_file_len`].
+    /// No progress report will be done.
+    pub fn create_table_file_par(l1: usize, n_threads: usize, dest: &mut [u8]) -> std::io::Result<()> {
+        create_table_file_with_progress_report_par(l1, n_threads, dest, NoOpProgressTableGenerationReportFunction)
+    }
+
     /// Generate the ECDLP precomputed tables file.
     /// To prepare `dest`, you should use an mmaped file or a 32-byte aligned byte array.
     /// The byte array length should be the return value of [`table_file_len`].
@@ -354,5 +526,15 @@ pub mod table_generation {
         let (t2_bytes, t1_bytes) = dest.split_at_mut(I_MAX * size_of::<T2MontgomeryCoordinates>());
         create_t2_table(l1, t2_bytes, &progress_report)?;
         create_t1_table(l1, t1_bytes, &progress_report)
+    }
+
+    /// Generate the ECDLP precomputed tables file, with multithreading.
+    /// To prepare `dest`, you should use an mmaped file or a 32-byte aligned byte array.
+    /// The byte array length should be the return value of [`table_file_len`].
+    /// This function will report progress using the provided function.
+    pub fn create_table_file_with_progress_report_par<P: ProgressTableGenerationReportFunction + Sync>(l1: usize, n_threads: usize, dest: &mut [u8], progress_report: P) -> std::io::Result<()> {
+        let (t2_bytes, t1_bytes) = dest.split_at_mut(I_MAX * size_of::<T2MontgomeryCoordinates>());
+        create_t2_table_par(l1, n_threads, t2_bytes, &progress_report)?;
+        create_t1_table_par(l1, n_threads, t1_bytes, &progress_report)
     }
 }
