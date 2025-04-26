@@ -621,21 +621,34 @@ fn i64_to_scalar(n: i64) -> Scalar {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{path::Path, sync::{Arc, Mutex}};
 
     use super::*;
     use rand::Rng;
 
     const L1: usize = 26;
 
-    fn read_or_gen_tables() -> ECDLPTables {
-        if !Path::new("ecdlp_table.bin").exists() {
+    // Necessary for one ECDLP tables allocation only
+    static TABLES: Mutex<Option<Arc<ECDLPTables>>> = Mutex::new(None);
+
+    fn read_or_gen_tables() -> Arc<ECDLPTables> {
+        let mut tables = TABLES.lock().expect("acquire tables lock");
+        if let Some(v) = tables.as_ref().cloned() {
+            return v;
+        }
+
+        let inner = if !Path::new("ecdlp_table.bin").exists() {
             let tables = ECDLPTables::generate(L1).unwrap();
             tables.write_to_file("ecdlp_table.bin").unwrap();
             tables
         } else {
             ECDLPTables::load_from_file(L1, "ecdlp_table.bin").unwrap()
-        }
+        };
+
+        let t = Arc::new(inner);
+        *tables = Some(t.clone());
+
+        t
     }
 
     #[test]
