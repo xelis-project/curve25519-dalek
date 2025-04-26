@@ -333,10 +333,10 @@ fn decode_prep<R: ProgressReportFunction>(
     };
     
     // Adjust the normalized point for this specific thread
-    let normalized = &point - RistrettoPoint::mul_base(&i64_to_scalar(offset + thread_scalar_offset));
+    let normalized = point - RistrettoPoint::mul_base(&i64_to_scalar(offset + thread_scalar_offset));
 
     let j_end = (amplitude >> precomputed_tables.get_l1()) as usize;
-    let divceil = |a, b| (a + b - 1) / b;
+    let divceil = |a: usize, b: usize| a.div_ceil(b);
     
     // Calculate appropriate num_batches for this thread
     let thread_j_end = if n_threads > 1 {

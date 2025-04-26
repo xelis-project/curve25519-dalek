@@ -8,6 +8,9 @@ Entries are listed in reverse chronological order per undeprecated major series.
 
 # Unreleased
 
+* ECDLP feature
+* Bump MSRV from 1.60.0 to 1.80.0
+
 # 2.x series
 
 ## 2.1.1

@@ -129,8 +129,8 @@ impl CuckooT1HashMapView<'_> {
         for i in 0..CUCKOO_K {
             let start = i * 8;
             let end = start + 4;
-            let key = u32::from_be_bytes(x[end..end + 4].try_into().unwrap());
-            let h = u32::from_be_bytes(x[start..start + 4].try_into().unwrap()) as usize
+            let key = u32::from_be_bytes(x[end..end + 4].try_into().expect("key u32"));
+            let h = u32::from_be_bytes(x[start..start + 4].try_into().expect("h u32")) as usize
                 % self.cuckoo_len;
             if self.keys[h] == key {
                 let value = self.values[h] as u64;
@@ -213,8 +213,8 @@ pub mod table_generation {
                 let x = all_entries[v as usize].as_ref();
                 let start = (old_hash_id as usize - 1) * 8;
                 let end = start + 4;
-                let mut key = u32::from_be_bytes(x[end..end + 4].try_into().unwrap());
-                let h1 = u32::from_be_bytes(x[start..start + 4].try_into().unwrap()) as usize;
+                let mut key = u32::from_be_bytes(x[end..end + 4].try_into().expect("key u32"));
+                let h1 = u32::from_be_bytes(x[start..start + 4].try_into().expect("h1 u32")) as usize;
                 let h = h1 % cuckoo_len;
 
                 if hash_index[h] == 0 {
