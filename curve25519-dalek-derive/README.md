@@ -83,6 +83,12 @@ it moves the `unsafe` from the function prototype into the macro name, and can b
 
 ```rust,compile_fail
 // ERROR: `#[target_feature(..)]` can only be applied to `unsafe` functions
+// on versions <= 1.86
+#[rustversion::before(1.86)]
+#[target_feature(enable = "avx2")]
+unsafe fn func() {}
+
+#[rustversion::since(1.86)]
 #[target_feature(enable = "avx2")]
 fn func() {}
 ```
