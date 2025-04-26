@@ -702,18 +702,9 @@ mod tests {
     }
 
     #[test]
-    fn test_table_par() {
-        use std::time::Instant;
-        
-        // Measure parallel generation time
-        let start = Instant::now();
+    fn test_table_par() {        
         let tables_par = ECDLPTables::generate_par(18, std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8)).unwrap();
-        let par_duration = start.elapsed();
-
-        // Measure sequential generation time
-        let start = Instant::now();
         let tables_seq = ECDLPTables::generate(18).unwrap();
-        let seq_duration = start.elapsed();
         
         // Verify both tables are identical
         assert_eq!(tables_seq.as_slice(), tables_par.as_slice(), 
