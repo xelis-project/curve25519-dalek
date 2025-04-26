@@ -1,15 +1,11 @@
-use std::path::Path;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use curve25519_dalek::{
     constants::RISTRETTO_BASEPOINT_POINT as G,
-    ecdlp::{
-        self,
-        ECDLPArguments,
-        ECDLPTables
-    },
+    ecdlp::{self, ECDLPArguments, ECDLPTables},
     Scalar,
 };
 use rand::Rng;
+use std::path::Path;
 
 pub fn ecdlp_bench(c: &mut Criterion) {
     if !Path::new("ecdlp_table.bin").exists() {
@@ -119,18 +115,21 @@ pub fn ecdlp_bench(c: &mut Criterion) {
         });
     });
 
-    c.bench_function(&format!("fast ecdlp for number < {} T=2", (1i64 << 47)), |b| {
-        let num = rand::thread_rng().gen_range(0u64..(1 << 47));
-        let point = Scalar::from(num) * G;
-        b.iter(|| {
-            let res = ecdlp::par_decode(
-                &view,
-                black_box(point),
-                ECDLPArguments::new_with_range(0, 1 << 48).n_threads(1),
-            );
-            assert_eq!(res, Some(num as i64));
-        });
-    });
+    c.bench_function(
+        &format!("fast ecdlp for number < {} T=2", (1i64 << 47)),
+        |b| {
+            let num = rand::thread_rng().gen_range(0u64..(1 << 47));
+            let point = Scalar::from(num) * G;
+            b.iter(|| {
+                let res = ecdlp::par_decode(
+                    &view,
+                    black_box(point),
+                    ECDLPArguments::new_with_range(0, 1 << 48).n_threads(1),
+                );
+                assert_eq!(res, Some(num as i64));
+            });
+        },
+    );
 
     c.bench_function(&format!("fast ecdlp for number < {}", (1i64 << 44)), |b| {
         let num = rand::thread_rng().gen_range(0u64..(1 << 44));

@@ -91,17 +91,19 @@ mod affine_montgomery;
 mod table;
 
 use crate::{
-    constants::MONTGOMERY_A_NEG,
-    constants::RISTRETTO_BASEPOINT_POINT as G,
-    field::FieldElement, RistrettoPoint, Scalar,
+    constants::MONTGOMERY_A_NEG, constants::RISTRETTO_BASEPOINT_POINT as G, field::FieldElement,
+    RistrettoPoint, Scalar,
 };
 use affine_montgomery::AffineMontgomeryPoint;
 use core::{
     ops::ControlFlow,
-    sync::atomic::{AtomicBool, Ordering}
+    sync::atomic::{AtomicBool, Ordering},
 };
 
-pub use table::{table_generation, ECDLPTablesFileView, ProgressTableGenerationReportFunction, NoOpProgressTableGenerationReportFunction, ReportStep};
+pub use table::{
+    table_generation, ECDLPTablesFileView, NoOpProgressTableGenerationReportFunction,
+    ProgressTableGenerationReportFunction, ReportStep,
+};
 
 use table::{BATCH_SIZE, L2};
 
@@ -171,7 +173,10 @@ impl ECDLPTables {
     }
 
     /// Generate a new precomputed tables with a progress report function.
-    pub fn generate_with_progress_report<P: ProgressTableGenerationReportFunction>(l1: usize, p: P) -> std::io::Result<Self> {
+    pub fn generate_with_progress_report<P: ProgressTableGenerationReportFunction>(
+        l1: usize,
+        p: P,
+    ) -> std::io::Result<Self> {
         let mut zelf = Self::empty(l1);
         table_generation::create_table_file_with_progress_report(l1, zelf.as_mut_slice(), p)?;
 
@@ -273,7 +278,7 @@ impl<F: ProgressReportFunction> ECDLPArguments<F> {
     /// ```no_run
     /// use curve25519_dalek::ecdlp::ECDLPArguments;
     /// use std::ops::ControlFlow;
-    /// 
+    ///
     /// let ecdlp_args = ECDLPArguments::new_with_range(0, 1 << 48)
     ///     .progress_report_function(|_progress| {
     ///         // do something with `progress`
@@ -300,7 +305,7 @@ impl<F: ProgressReportFunction> ECDLPArguments<F> {
     ///
     /// ```
     /// use curve25519_dalek::ecdlp::ECDLPArguments;
-    /// 
+    ///
     /// let n_threads = std::thread::available_parallelism()
     ///     .expect("cannot get available parallelism")
     ///     .get();
@@ -318,12 +323,14 @@ fn decode_prep<R: ProgressReportFunction>(
     point: RistrettoPoint,
     args: &ECDLPArguments<R>,
     n_threads: usize,
-    thread_i: usize,  // Add thread_i parameter
+    thread_i: usize, // Add thread_i parameter
 ) -> (i64, RistrettoPoint, usize) {
     let amplitude = (args.range_end - args.range_start).max(0);
 
-    let offset = args.range_start + ((1 << (L2 - 1)) << precomputed_tables.get_l1()) + (1 << (precomputed_tables.get_l1() - 1));
-    
+    let offset = args.range_start
+        + ((1 << (L2 - 1)) << precomputed_tables.get_l1())
+        + (1 << (precomputed_tables.get_l1() - 1));
+
     // Calculate thread-specific offset adjustment
     let thread_scalar_offset = if n_threads > 1 {
         // Divide the range into n_threads parts and adjust offset for this thread
@@ -331,20 +338,21 @@ fn decode_prep<R: ProgressReportFunction>(
     } else {
         0
     };
-    
+
     // Adjust the normalized point for this specific thread
-    let normalized = point - RistrettoPoint::mul_base(&i64_to_scalar(offset + thread_scalar_offset));
+    let normalized =
+        point - RistrettoPoint::mul_base(&i64_to_scalar(offset + thread_scalar_offset));
 
     let j_end = (amplitude >> precomputed_tables.get_l1()) as usize;
     let divceil = |a: usize, b: usize| a.div_ceil(b);
-    
+
     // Calculate appropriate num_batches for this thread
     let thread_j_end = if n_threads > 1 {
         j_end / n_threads
     } else {
         j_end
     };
-    
+
     let num_batches = divceil(thread_j_end, 1 << L2);
 
     (offset + thread_scalar_offset, normalized, num_batches)
@@ -418,7 +426,7 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
         let handles = (0..args.n_threads)
             .map(|thread_i| {
                 let (offset, normalized, num_batches) =
-                  decode_prep(precomputed_tables, point, &args, args.n_threads, thread_i);
+                    decode_prep(precomputed_tables, point, &args, args.n_threads, thread_i);
 
                 let end_flag = &end_flag;
 
@@ -437,11 +445,8 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
                 };
 
                 let handle = s.spawn(move || {
-                    let point_iter = make_point_iterator(
-                        precomputed_tables,
-                        normalized,
-                        num_batches,
-                    );
+                    let point_iter =
+                        make_point_iterator(precomputed_tables, normalized, num_batches);
                     let res = fast_ecdlp(
                         precomputed_tables,
                         normalized,
@@ -514,9 +519,13 @@ fn fast_ecdlp(
         if t1_table
             .lookup(&target_montgomery.u.as_bytes(), |i| {
                 consider_candidate(((j_start as i64) << precomputed_tables.get_l1()) + i as i64)
-                    || consider_candidate(((j_start as i64) << precomputed_tables.get_l1()) - i as i64)
+                    || consider_candidate(
+                        ((j_start as i64) << precomputed_tables.get_l1()) - i as i64,
+                    )
             })
-            .is_some() && !pseudo_constant_time {
+            .is_some()
+            && !pseudo_constant_time
+        {
             break 'outer;
         }
 
@@ -529,8 +538,11 @@ fn fast_ecdlp(
             if diff == FieldElement::ZERO {
                 // Case 1: (Montgomery addition) exceptional case when T2[j] = Pm.
                 // m1 = j * 2^L1, m2 = -j * 2^L1
-                let found = consider_candidate((j_start as i64 + j as i64) << precomputed_tables.get_l1())
-                    || consider_candidate((j_start as i64 - j as i64) << precomputed_tables.get_l1());
+                let found =
+                    consider_candidate((j_start as i64 + j as i64) << precomputed_tables.get_l1())
+                        || consider_candidate(
+                            (j_start as i64 - j as i64) << precomputed_tables.get_l1(),
+                        );
                 if !pseudo_constant_time && found {
                     break 'outer;
                 }
@@ -557,8 +569,11 @@ fn fast_ecdlp(
             // Case 3: general case, negative j.
             if t1_table
                 .lookup(&qx.as_bytes(), |i| {
-                    consider_candidate(((j_start as i64 - j as i64) << precomputed_tables.get_l1()) + i as i64)
-                        || consider_candidate(((j_start as i64 - j as i64) << precomputed_tables.get_l1()) - i as i64)
+                    consider_candidate(
+                        ((j_start as i64 - j as i64) << precomputed_tables.get_l1()) + i as i64,
+                    ) || consider_candidate(
+                        ((j_start as i64 - j as i64) << precomputed_tables.get_l1()) - i as i64,
+                    )
                 })
                 .is_some()
             {
@@ -576,8 +591,11 @@ fn fast_ecdlp(
             // Case 4: general case, positive j.
             if t1_table
                 .lookup(&qx.as_bytes(), |i| {
-                    consider_candidate(((j_start as i64 + j as i64) << precomputed_tables.get_l1()) + i as i64)
-                        || consider_candidate(((j_start as i64 + j as i64) << precomputed_tables.get_l1()) - i as i64)
+                    consider_candidate(
+                        ((j_start as i64 + j as i64) << precomputed_tables.get_l1()) + i as i64,
+                    ) || consider_candidate(
+                        ((j_start as i64 + j as i64) << precomputed_tables.get_l1()) - i as i64,
+                    )
                 })
                 .is_some()
             {
@@ -671,17 +689,23 @@ mod tests {
 
     #[test]
     fn test_ecdlp_par_decode() {
-        let base: u64 = (1<<48) / 16;
+        let base: u64 = (1 << 48) / 16;
 
         let tables = read_or_gen_tables();
         let view = tables.view();
 
         for i in 0..17 {
-          let value = base * i;
-  
-          let point = RistrettoPoint::mul_base(&Scalar::from(value));
-          let res = par_decode(&view, point, ECDLPArguments::new_with_range(0, 1 << 48).n_threads(4).pseudo_constant_time(true));
-          assert_eq!(res, Some(value as i64));
+            let value = base * i;
+
+            let point = RistrettoPoint::mul_base(&Scalar::from(value));
+            let res = par_decode(
+                &view,
+                point,
+                ECDLPArguments::new_with_range(0, 1 << 48)
+                    .n_threads(4)
+                    .pseudo_constant_time(true),
+            );
+            assert_eq!(res, Some(value as i64));
         }
     }
 }

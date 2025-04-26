@@ -204,8 +204,13 @@ pub mod table_generation {
 
             if i % (j_max / 1000 + 1) == 0 {
                 let progress = i as f64 / j_max as f64;
-                if let ControlFlow::Break(_) = progress_report.report(progress, ReportStep::T1CuckooSetup) {
-                    return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "Interrupted by progress report"));
+                if let ControlFlow::Break(_) =
+                    progress_report.report(progress, ReportStep::T1CuckooSetup)
+                {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Interrupted,
+                        "Interrupted by progress report",
+                    ));
                 }
             }
 
@@ -214,7 +219,8 @@ pub mod table_generation {
                 let start = (old_hash_id as usize - 1) * 8;
                 let end = start + 4;
                 let mut key = u32::from_be_bytes(x[end..end + 4].try_into().expect("key u32"));
-                let h1 = u32::from_be_bytes(x[start..start + 4].try_into().expect("h1 u32")) as usize;
+                let h1 =
+                    u32::from_be_bytes(x[start..start + 4].try_into().expect("h1 u32")) as usize;
                 let h = h1 % cuckoo_len;
 
                 if hash_index[h] == 0 {
@@ -240,7 +246,11 @@ pub mod table_generation {
         Ok(())
     }
 
-    fn create_t1_table<P: ProgressTableGenerationReportFunction>(l1: usize, dest: &mut [u8], progress_report: &P) -> std::io::Result<()> {
+    fn create_t1_table<P: ProgressTableGenerationReportFunction>(
+        l1: usize,
+        dest: &mut [u8],
+        progress_report: &P,
+    ) -> std::io::Result<()> {
         let j_max = 1 << (l1 - 1);
         let cuckoo_len = (j_max as u64 * 30 / 100) as usize + j_max;
 
@@ -248,7 +258,7 @@ pub mod table_generation {
 
         let acc = RistrettoPoint::identity().0;
         let step = RISTRETTO_BASEPOINT_POINT.0.mul_by_cofactor(); // table is based on number*cofactor
-        
+
         let mut acc = AffineMontgomeryPoint::from(&acc);
         let step = AffineMontgomeryPoint::from(&step);
         for i in 0..=j_max {
@@ -256,8 +266,13 @@ pub mod table_generation {
             let point = acc; // i * G
 
             if i % (j_max / 1000 + 1) == 0 {
-                if let ControlFlow::Break(_) = progress_report.report(i as f64 / j_max as f64, ReportStep::T1PointsGeneration) {
-                    return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "Interrupted by progress report"));
+                if let ControlFlow::Break(_) =
+                    progress_report.report(i as f64 / j_max as f64, ReportStep::T1PointsGeneration)
+                {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Interrupted,
+                        "Interrupted by progress report",
+                    ));
                 }
             }
 
@@ -281,7 +296,11 @@ pub mod table_generation {
         Ok(())
     }
 
-    fn create_t2_table<P: ProgressTableGenerationReportFunction>(l1: usize, dest: &mut [u8], progress_report: &P) -> std::io::Result<()> {
+    fn create_t2_table<P: ProgressTableGenerationReportFunction>(
+        l1: usize,
+        dest: &mut [u8],
+        progress_report: &P,
+    ) -> std::io::Result<()> {
         let two_to_l1 = EdwardsPoint::mul_base(&Scalar::from(1u32 << l1)); // 2^l1
         let two_to_l1 = two_to_l1.mul_by_cofactor(); // clear cofactor
 
@@ -290,8 +309,13 @@ pub mod table_generation {
         let two_to_l1 = AffineMontgomeryPoint::from(&two_to_l1);
         let mut acc = two_to_l1;
         for j in 1..I_MAX {
-            if let ControlFlow::Break(_) = progress_report.report(j as f64 / I_MAX as f64, ReportStep::T2Table) {
-                return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "Interrupted by progress report"));
+            if let ControlFlow::Break(_) =
+                progress_report.report(j as f64 / I_MAX as f64, ReportStep::T2Table)
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Interrupted,
+                    "Interrupted by progress report",
+                ));
             }
 
             arr[j - 1] = acc.into();
@@ -322,7 +346,11 @@ pub mod table_generation {
     /// To prepare `dest`, you should use an mmaped file or a 32-byte aligned byte array.
     /// The byte array length should be the return value of [`table_file_len`].
     /// This function will report progress using the provided function.
-    pub fn create_table_file_with_progress_report<P: ProgressTableGenerationReportFunction>(l1: usize, dest: &mut [u8], progress_report: P) -> std::io::Result<()> {
+    pub fn create_table_file_with_progress_report<P: ProgressTableGenerationReportFunction>(
+        l1: usize,
+        dest: &mut [u8],
+        progress_report: P,
+    ) -> std::io::Result<()> {
         let (t2_bytes, t1_bytes) = dest.split_at_mut(I_MAX * size_of::<T2MontgomeryCoordinates>());
         create_t2_table(l1, t2_bytes, &progress_report)?;
         create_t1_table(l1, t1_bytes, &progress_report)
