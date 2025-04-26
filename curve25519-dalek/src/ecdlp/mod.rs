@@ -621,7 +621,10 @@ fn i64_to_scalar(n: i64) -> Scalar {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::Path, sync::{Arc, Mutex}};
+    use std::{
+        path::Path,
+        sync::{Arc, Mutex},
+    };
 
     use super::*;
     use rand::Rng;
