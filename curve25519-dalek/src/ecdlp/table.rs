@@ -181,6 +181,7 @@ impl<F: Fn(f64, ReportStep) -> ControlFlow<()>> ProgressTableGenerationReportFun
 pub mod table_generation {
     //! Generate the precomputed tables.
 
+    use std::thread;
     use super::*;
 
     fn t1_cuckoo_setup<P: ProgressTableGenerationReportFunction>(
@@ -332,7 +333,6 @@ pub mod table_generation {
         progress_report: &P,
     ) -> std::io::Result<()> {
         use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Mutex;
 
         let j_max = 1 << (l1 - 1);
         let cuckoo_len = (j_max as u64 * 30 / 100) as usize + j_max;
@@ -342,75 +342,70 @@ pub mod table_generation {
         let report_every = j_max / 1000 + 1;
 
         // Pre-allocate the full array
-        let all_entries = Mutex::new(vec![CompressedFieldElement::default(); j_max + 1]);
+        let mut all_entries = Vec::new();
 
         // Calculate chunks
         let chunk_size = (j_max + 1 + n_threads - 1) / n_threads; // ceiling division
 
-        std::thread::scope(|s| {
-            let mut handles = Vec::new();
+        thread::scope(|s| {
+            let handles = (0..n_threads)
+                .filter_map(|thread_i| {
+                    let start_idx = thread_i * chunk_size;
+                    let end_idx = ((thread_i + 1) * chunk_size).min(j_max + 1);
 
-            for thread_i in 0..n_threads {
-                let start_idx = thread_i * chunk_size;
-                let end_idx = std::cmp::min((thread_i + 1) * chunk_size, j_max + 1);
+                    if start_idx >= end_idx {
+                        return None;
+                    }
 
-                if start_idx >= end_idx {
-                    continue;
-                }
+                    let progress_counter = &progress_counter;
 
-                let all_entries = &all_entries;
-                let progress_counter = &progress_counter;
+                    Some(s.spawn(move || {
+                        let step = AffineMontgomeryPoint::from(
+                            &RISTRETTO_BASEPOINT_POINT.0.mul_by_cofactor(),
+                        );
 
-                handles.push(s.spawn(move || {
-                    let step =
-                        AffineMontgomeryPoint::from(&RISTRETTO_BASEPOINT_POINT.0.mul_by_cofactor());
+                        // Compute starting point for this chunk
+                        let start_point = if start_idx == 0 {
+                            AffineMontgomeryPoint::from(&RistrettoPoint::identity().0)
+                        } else {
+                            let scalar = Scalar::from(start_idx as u64);
+                            let point = EdwardsPoint::mul_base(&scalar).mul_by_cofactor();
+                            AffineMontgomeryPoint::from(&point)
+                        };
 
-                    // Compute starting point for this chunk
-                    let start_point = if start_idx == 0 {
-                        AffineMontgomeryPoint::from(&RistrettoPoint::identity().0)
-                    } else {
-                        let scalar = Scalar::from(start_idx as u64);
-                        let point = EdwardsPoint::mul_base(&scalar).mul_by_cofactor();
-                        AffineMontgomeryPoint::from(&point)
-                    };
+                        let mut acc = start_point;
+                        let mut chunk_entries = Vec::with_capacity(end_idx - start_idx);
 
-                    let mut acc = start_point;
-                    let mut chunk_entries = Vec::with_capacity(end_idx - start_idx);
+                        for i in start_idx..end_idx {
+                            chunk_entries.push(acc.u.as_bytes());
 
-                    for i in start_idx..end_idx {
-                        chunk_entries.push(acc.u.as_bytes());
-
-                        if i % report_every == 0 {
-                            let old_count = progress_counter.fetch_add(1, Ordering::Relaxed);
-                            if old_count % 10 == 0 {
-                                let progress = (old_count * report_every) as f64 / j_max as f64;
-                                if let ControlFlow::Break(_) =
-                                    progress_report.report(progress, ReportStep::T1PointsGeneration)
-                                {
-                                    // Can't easily interrupt from inside thread, would need to add a flag
+                            if i % report_every == 0 {
+                                let old_count = progress_counter.fetch_add(1, Ordering::Relaxed);
+                                if old_count % 10 == 0 {
+                                    let progress = (old_count * report_every) as f64 / j_max as f64;
+                                    if let ControlFlow::Break(_) = progress_report
+                                        .report(progress, ReportStep::T1PointsGeneration)
+                                    {
+                                        // Can't easily interrupt from inside thread, would need to add a flag
+                                    }
                                 }
                             }
+
+                            acc = acc.addition_not_ct(&step);
                         }
 
-                        acc = acc.addition_not_ct(&step);
-                    }
-
-                    // Write results to the shared array
-                    let mut all_entries = all_entries.lock().unwrap();
-                    for (i, entry) in chunk_entries.into_iter().enumerate() {
-                        all_entries[start_idx + i] = entry;
-                    }
-                }));
-            }
+                        // Write results to the shared array
+                        chunk_entries
+                    }))
+                })
+                .collect::<Vec<_>>();
 
             // Wait for all threads to complete
             for handle in handles {
-                handle.join().expect("Thread panicked");
+                let entries = handle.join().expect("Thread panicked");
+                all_entries.extend(entries);
             }
         });
-
-        // Convert to owned vector after all threads complete
-        let all_entries = all_entries.into_inner().unwrap();
 
         // The cuckoo setup remains sequential as it's harder to parallelize
         let (t1_keys_dest, t1_values_dest) = dest.split_at_mut(cuckoo_len * size_of::<u32>());
@@ -447,9 +442,9 @@ pub mod table_generation {
         let report_every = total_points / 1000 + 1;
 
         // Calculate chunks
-        let chunk_size = (total_points + n_threads - 1) / n_threads;
+        let chunk_size = total_points.div_ceil(n_threads);
 
-        std::thread::scope(|s| {
+        thread::scope(|s| {
             // Split the array into chunks for each thread
             let arr_chunks: Vec<&mut [T2MontgomeryCoordinates]> =
                 arr.chunks_mut(chunk_size).collect();
