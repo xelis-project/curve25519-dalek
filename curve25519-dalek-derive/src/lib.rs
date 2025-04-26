@@ -289,12 +289,12 @@ fn is_path_eq(path: &syn::Path, ident: &str) -> bool {
 
 #[rustversion::before(1.86)]
 fn is_rust_compatible() -> bool {
-    true
+    false
 }
 
 #[rustversion::since(1.86)]
 fn is_rust_compatible() -> bool {
-    false
+    true
 }
 
 fn process_function(
@@ -302,6 +302,8 @@ fn process_function(
     function: syn::ItemFn,
     outer: Option<(syn::Generics, Box<syn::Type>)>,
 ) -> TokenStream {
+    // Only versions below 1.86.0 must ensure that the function is
+    // marked as unsafe when using `target_feature`
     if function.sig.unsafety.is_some() || is_rust_compatible() {
         return quote::quote! {
             #[target_feature(enable = #attributes)]
