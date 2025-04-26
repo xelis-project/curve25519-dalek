@@ -61,8 +61,8 @@ mod ecdlp_notes {
     //!   point. T1 = <i * G => i | i in \[1, 2^l1\]>
     //! - We have a T2 linear table (an array), where T2 = \[j * 2^l1 * G | j in \[1, 2^l2\]\]
     //! - For each j in 0..2^l2
-    //!     Compute the difference between T2\[j\] and the target point
-    //!     if let Some(i) = T1.get(the difference) => the decoded integer is j * 2^L1 + i.
+    //!   Compute the difference between T2\[j\] and the target point
+    //!   if let Some(i) = T1.get(the difference) => the decoded integer is j * 2^L1 + i.
     //!
     //! On top of this regular BSGS algorithm, we add the following optimizations:
     //! - Batching. The paper uses a tree-based Montgomery trick - instead, we use the batched
