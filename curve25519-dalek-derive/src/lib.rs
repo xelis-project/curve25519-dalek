@@ -287,12 +287,22 @@ fn is_path_eq(path: &syn::Path, ident: &str) -> bool {
             .all(|(segment, expected)| segment.ident == expected && segment.arguments.is_none())
 }
 
+#[rustversion::before(1.86)]
+fn is_rust_compatible() -> bool {
+    true
+}
+
+#[rustversion::since(1.86)]
+fn is_rust_compatible() -> bool {
+    false
+}
+
 fn process_function(
     attributes: &syn::LitStr,
     function: syn::ItemFn,
     outer: Option<(syn::Generics, Box<syn::Type>)>,
 ) -> TokenStream {
-    if function.sig.unsafety.is_some() {
+    if function.sig.unsafety.is_some() || is_rust_compatible() {
         return quote::quote! {
             #[target_feature(enable = #attributes)]
             #function
