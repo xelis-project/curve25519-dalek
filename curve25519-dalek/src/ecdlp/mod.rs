@@ -192,9 +192,18 @@ impl ECDLPTables {
     }
 
     /// Generate a new precomputed tables with a progress report function, with multithreading.
-    pub fn generate_with_progress_report_par<P: ProgressTableGenerationReportFunction + Sync>(l1: usize, n_threads: usize, p: P) -> std::io::Result<Self> {
+    pub fn generate_with_progress_report_par<P: ProgressTableGenerationReportFunction + Sync>(
+        l1: usize,
+        n_threads: usize,
+        p: P,
+    ) -> std::io::Result<Self> {
         let mut zelf = Self::empty(l1);
-        table_generation::create_table_file_with_progress_report_par(l1, n_threads, zelf.as_mut_slice(), p)?;
+        table_generation::create_table_file_with_progress_report_par(
+            l1,
+            n_threads,
+            zelf.as_mut_slice(),
+            p,
+        )?;
 
         Ok(zelf)
     }
@@ -742,15 +751,24 @@ mod tests {
     }
 
     #[test]
-    fn test_table_par() {        
+    fn test_table_par() {
         // Measure parallel generation time
-        let tables_par = ECDLPTables::generate_par(18, std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8)).unwrap();
+        let tables_par = ECDLPTables::generate_par(
+            18,
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(8),
+        )
+        .unwrap();
 
         // Measure sequential generation time
         let tables_seq = ECDLPTables::generate(18).unwrap();
-        
+
         // Verify both tables are identical
-        assert_eq!(tables_seq.as_slice(), tables_par.as_slice(), 
-                   "Sequential and parallel generated tables should be identical");
+        assert_eq!(
+            tables_seq.as_slice(),
+            tables_par.as_slice(),
+            "Sequential and parallel generated tables should be identical"
+        );
     }
 }

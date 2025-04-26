@@ -1,11 +1,11 @@
-use std::path::Path;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use curve25519_dalek::{
     constants::RISTRETTO_BASEPOINT_POINT as G,
     ecdlp::{self, ECDLPArguments, ECDLPTables},
     Scalar,
 };
 use rand::Rng;
+use std::path::Path;
 use std::path::Path;
 
 pub fn ecdlp_bench(c: &mut Criterion) {
@@ -186,26 +186,28 @@ pub fn ecdlp_bench(c: &mut Criterion) {
 }
 
 fn bench_table_generation(c: &mut Criterion) {
-  let mut group = c.benchmark_group("Table Generation");
-  
-  // Configure the benchmark for faster execution
-  group.sample_size(10);                     // Reduce to minimum samples
-  group.measurement_time(std::time::Duration::from_secs(5));  // Less measurement time
-  group.warm_up_time(std::time::Duration::from_secs(1));     // Less warmup time
+    let mut group = c.benchmark_group("Table Generation");
 
-  let n_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8);
-  
-  for l1 in [13, 18, 21].iter() {
-      group.bench_with_input(BenchmarkId::new("Sequential", l1), l1, |b, &l1| {
-          b.iter(|| ECDLPTables::generate(l1).unwrap());
-      });
-      
-      group.bench_with_input(BenchmarkId::new("Parallel", l1), l1, |b, &l1| {
-          b.iter(|| ECDLPTables::generate_par(l1, n_threads).unwrap());
-      });
-  }
+    // Configure the benchmark for faster execution
+    group.sample_size(10); // Reduce to minimum samples
+    group.measurement_time(std::time::Duration::from_secs(5)); // Less measurement time
+    group.warm_up_time(std::time::Duration::from_secs(1)); // Less warmup time
 
-  group.finish();
+    let n_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(8);
+
+    for l1 in [13, 18, 21].iter() {
+        group.bench_with_input(BenchmarkId::new("Sequential", l1), l1, |b, &l1| {
+            b.iter(|| ECDLPTables::generate(l1).unwrap());
+        });
+
+        group.bench_with_input(BenchmarkId::new("Parallel", l1), l1, |b, &l1| {
+            b.iter(|| ECDLPTables::generate_par(l1, n_threads).unwrap());
+        });
+    }
+
+    group.finish();
 }
 
 criterion_group!(ecdlp, ecdlp_bench);
