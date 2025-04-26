@@ -603,20 +603,26 @@ fn i64_to_scalar(n: i64) -> Scalar {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
     use rand::Rng;
 
     const L1: usize = 26;
 
-    #[test]
-    fn gen_t1_t2() {
-        let tables = ECDLPTables::generate(L1).unwrap();
-        tables.write_to_file("ecdlp_table.bin").unwrap();
+    fn read_or_gen_tables() -> ECDLPTables {
+        if !Path::new("ecdlp_table.bin").exists() {
+            let tables = ECDLPTables::generate(L1).unwrap();
+            tables.write_to_file("ecdlp_table.bin").unwrap();
+            tables
+        } else {
+            ECDLPTables::load_from_file(L1, "ecdlp_table.bin").unwrap()
+        }
     }
 
     #[test]
     fn test_ecdlp_cofactors() {
-        let tables = ECDLPTables::load_from_file(L1, "ecdlp_table.bin").unwrap();
+        let tables = read_or_gen_tables();
         let view = tables.view();
 
         for i in (0..(1u64 << 48)).step_by(1 << L1).take(1 << 12) {
@@ -643,7 +649,7 @@ mod tests {
 
     #[test]
     fn test_ecdlp() {
-        let tables = ECDLPTables::load_from_file(L1, "ecdlp_table.bin").unwrap();
+        let tables = read_or_gen_tables();
         let view = tables.view();
 
         for i in (0..(1u64 << 48)).step_by(1 << L1).take(1 << 12) {
@@ -667,10 +673,11 @@ mod tests {
     fn test_ecdlp_par_decode() {
         let base: u64 = (1<<48) / 16;
 
+        let tables = read_or_gen_tables();
+        let view = tables.view();
+
         for i in 0..17 {
           let value = base * i;
-          let tables = ECDLPTables::load_from_file(L1, "ecdlp_table.bin").unwrap();
-          let view = tables.view();
   
           let point = RistrettoPoint::mul_base(&Scalar::from(value));
           let res = par_decode(&view, point, ECDLPArguments::new_with_range(0, 1 << 48).n_threads(4).pseudo_constant_time(true));
