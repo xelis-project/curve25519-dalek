@@ -386,8 +386,6 @@ fn make_point_iterator(
     // starting point for this thread
     let mut target_montgomery = AffineMontgomeryPoint::from(&normalized.0);
     let batch_step = -(els_per_batch as i64);
-    let mut target_montgomery = AffineMontgomeryPoint::from(&normalized.0);
-    let batch_step = -(els_per_batch as i64);
     let batch_step_montgomery =
         AffineMontgomeryPoint::from(&(i64_to_scalar(batch_step) * G).0.mul_by_cofactor());
 
@@ -503,7 +501,6 @@ fn fast_ecdlp(
 
     let mut found = None;
     let mut consider_candidate = |m| {
-        let l1 = precomputed_tables.get_l1();
         if i64_to_scalar(m) * G == target_point {
             found = found.or(Some(m as u64));
             true

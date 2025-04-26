@@ -410,7 +410,6 @@ pub mod table_generation {
         let report_every = total_points / 1000 + 1;
         
         // Calculate chunks
-        let n_threads = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8);
         let chunk_size = (total_points + n_threads - 1) / n_threads;
         
         std::thread::scope(|s| {
@@ -483,6 +482,10 @@ pub mod table_generation {
         create_table_file_with_progress_report(l1, dest, NoOpProgressTableGenerationReportFunction)
     }
 
+    /// Generate the ECDLP precomputed tables file, with multithreading.
+    /// To prepare `dest`, you should use an mmaped file or a 32-byte aligned byte array.
+    /// The byte array length should be the return value of [`table_file_len`].
+    /// No progress report will be done.
     pub fn create_table_file_par(l1: usize, n_threads: usize, dest: &mut [u8]) -> std::io::Result<()> {
         create_table_file_with_progress_report_par(l1, n_threads, dest, NoOpProgressTableGenerationReportFunction)
     }
@@ -497,6 +500,10 @@ pub mod table_generation {
         create_t1_table(l1, t1_bytes, &progress_report)
     }
 
+    /// Generate the ECDLP precomputed tables file, with multithreading.
+    /// To prepare `dest`, you should use an mmaped file or a 32-byte aligned byte array.
+    /// The byte array length should be the return value of [`table_file_len`].
+    /// This function will report progress using the provided function.
     pub fn create_table_file_with_progress_report_par<P: ProgressTableGenerationReportFunction + Sync>(l1: usize, n_threads: usize, dest: &mut [u8], progress_report: P) -> std::io::Result<()> {
         let (t2_bytes, t1_bytes) = dest.split_at_mut(I_MAX * size_of::<T2MontgomeryCoordinates>());
         create_t2_table_par(l1, n_threads, t2_bytes, &progress_report)?;
