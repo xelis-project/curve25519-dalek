@@ -17,7 +17,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
     let view = tables.view();
 
     c.bench_function("fast ecdlp non constant time", |b| {
-        let num = 1 << 46;
+        let num = 1u64 << 46;
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::decode(
