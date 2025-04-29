@@ -185,7 +185,11 @@ pub mod table_generation {
     //! Generate the precomputed tables.
 
     use super::*;
-    use std::thread;
+    use std::{
+        thread,
+        io,
+        sync::atomic::AtomicBool
+    };
 
     fn t1_cuckoo_setup<P: ProgressTableGenerationReportFunction>(
         cuckoo_len: usize,
@@ -194,7 +198,7 @@ pub mod table_generation {
         t1_values: &mut [u32],
         t1_keys: &mut [u32],
         progress_report: &P,
-    ) -> std::io::Result<()> {
+    ) -> io::Result<()> {
         use core::mem::swap;
 
         /// Dumb cuckoo rehashing threshold.
@@ -211,8 +215,8 @@ pub mod table_generation {
                 if let ControlFlow::Break(_) =
                     progress_report.report(progress, ReportStep::T1CuckooSetup)
                 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Interrupted,
+                    return Err(io::Error::new(
+                        io::ErrorKind::Interrupted,
                         "Interrupted by progress report",
                     ));
                 }
@@ -254,7 +258,7 @@ pub mod table_generation {
         l1: usize,
         dest: &mut [u8],
         progress_report: &P,
-    ) -> std::io::Result<()> {
+    ) -> io::Result<()> {
         let j_max = 1 << (l1 - 1);
         let cuckoo_len = (j_max as u64 * 30 / 100) as usize + j_max;
 
@@ -273,8 +277,8 @@ pub mod table_generation {
                 if let ControlFlow::Break(_) =
                     progress_report.report(i as f64 / j_max as f64, ReportStep::T1PointsGeneration)
                 {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Interrupted,
+                    return Err(io::Error::new(
+                        io::ErrorKind::Interrupted,
                         "Interrupted by progress report",
                     ));
                 }
@@ -304,7 +308,7 @@ pub mod table_generation {
         l1: usize,
         dest: &mut [u8],
         progress_report: &P,
-    ) -> std::io::Result<()> {
+    ) -> io::Result<()> {
         let two_to_l1 = EdwardsPoint::mul_base(&Scalar::from(1u32 << l1)); // 2^l1
         let two_to_l1 = two_to_l1.mul_by_cofactor(); // clear cofactor
 
@@ -316,8 +320,8 @@ pub mod table_generation {
             if let ControlFlow::Break(_) =
                 progress_report.report(j as f64 / I_MAX as f64, ReportStep::T2Table)
             {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Interrupted,
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
                     "Interrupted by progress report",
                 ));
             }
@@ -334,11 +338,12 @@ pub mod table_generation {
         n_threads: usize,
         dest: &mut [u8],
         progress_report: &P,
-    ) -> std::io::Result<()> {
+    ) -> io::Result<()> {
         let j_max = 1 << (l1 - 1);
         let cuckoo_len = (j_max as u64 * 30 / 100) as usize + j_max;
 
         // Use atomic counter for progress tracking
+        let interrupted = AtomicBool::new(false);
         let progress_counter = AtomicUsize::new(0);
         let report_every = j_max / 1000 + 1;
 
@@ -358,6 +363,7 @@ pub mod table_generation {
                         return None;
                     }
 
+                    let interrupted = &interrupted;
                     let progress_counter = &progress_counter;
 
                     Some(s.spawn(move || {
@@ -388,6 +394,8 @@ pub mod table_generation {
                                         .report(progress, ReportStep::T1PointsGeneration)
                                     {
                                         // Can't easily interrupt from inside thread, would need to add a flag
+                                        interrupted.store(true, Ordering::Relaxed);
+                                        return chunk_entries;
                                     }
                                 }
                             }
@@ -407,6 +415,13 @@ pub mod table_generation {
                 all_entries.extend(entries);
             }
         });
+
+        if interrupted.load(Ordering::Relaxed) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Interrupted by progress report",
+            ));
+        }
 
         // The cuckoo setup remains sequential as it's harder to parallelize
         let (t1_keys_dest, t1_values_dest) = dest.split_at_mut(cuckoo_len * size_of::<u32>());
@@ -430,13 +445,14 @@ pub mod table_generation {
         n_threads: usize,
         dest: &mut [u8],
         progress_report: &P,
-    ) -> std::io::Result<()> {
+    ) -> io::Result<()> {
         let two_to_l1 = EdwardsPoint::mul_base(&Scalar::from(1u32 << l1)).mul_by_cofactor();
         let two_to_l1_affine = AffineMontgomeryPoint::from(&two_to_l1);
 
         let coordinates: &mut [T2MontgomeryCoordinates] = bytemuck::cast_slice_mut(dest);
 
         let progress_counter = AtomicUsize::new(0);
+        let interrupted = AtomicBool::new(false);
         let total_points = I_MAX - 1;
         let report_every = total_points / 1000 + 1;
 
@@ -457,6 +473,7 @@ pub mod table_generation {
                         return None;
                     }
 
+                    let interrupted = &interrupted;
                     let progress_counter = &progress_counter;
 
                     Some(s.spawn(move || {
@@ -481,6 +498,8 @@ pub mod table_generation {
                                         progress_report.report(progress, ReportStep::T2Table)
                                     {
                                         // Can't easily interrupt from inside thread
+                                        interrupted.store(true, Ordering::Relaxed);
+                                        return
                                     }
                                 }
                             }
@@ -496,6 +515,13 @@ pub mod table_generation {
                 handle.join().expect("Thread panicked");
             }
         });
+
+        if interrupted.load(Ordering::Relaxed) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "Interrupted by progress report",
+            ));
+        }
 
         Ok(())
     }
@@ -513,7 +539,7 @@ pub mod table_generation {
     /// To prepare `dest`, you should use an mmaped file or a 32-byte aligned byte array.
     /// The byte array length should be the return value of [`table_file_len`].
     /// No progress report will be done.
-    pub fn create_table_file(l1: usize, dest: &mut [u8]) -> std::io::Result<()> {
+    pub fn create_table_file(l1: usize, dest: &mut [u8]) -> io::Result<()> {
         create_table_file_with_progress_report(l1, dest, NoOpProgressTableGenerationReportFunction)
     }
 
@@ -525,7 +551,7 @@ pub mod table_generation {
         l1: usize,
         n_threads: usize,
         dest: &mut [u8],
-    ) -> std::io::Result<()> {
+    ) -> io::Result<()> {
         create_table_file_with_progress_report_par(
             l1,
             n_threads,
@@ -542,7 +568,7 @@ pub mod table_generation {
         l1: usize,
         dest: &mut [u8],
         progress_report: P,
-    ) -> std::io::Result<()> {
+    ) -> io::Result<()> {
         let (t2_bytes, t1_bytes) = dest.split_at_mut(I_MAX * size_of::<T2MontgomeryCoordinates>());
         create_t2_table(l1, t2_bytes, &progress_report)?;
         create_t1_table(l1, t1_bytes, &progress_report)
@@ -559,7 +585,7 @@ pub mod table_generation {
         n_threads: usize,
         dest: &mut [u8],
         progress_report: P,
-    ) -> std::io::Result<()> {
+    ) -> io::Result<()> {
         let (t2_bytes, t1_bytes) = dest.split_at_mut(I_MAX * size_of::<T2MontgomeryCoordinates>());
         create_t2_table_par(l1, n_threads, t2_bytes, &progress_report)?;
         create_t1_table_par(l1, n_threads, t1_bytes, &progress_report)
