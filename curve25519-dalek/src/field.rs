@@ -115,6 +115,18 @@ impl FieldElement {
         bytes.ct_eq(&zero)
     }
 
+    /// Determine if this `FieldElement` is zero.
+    ///
+    /// # Return
+    ///
+    /// If zero, return `true`.  Otherwise, return `false`.
+    pub(crate) fn is_zero_not_ct(&self) -> bool {
+        let zero = [0u8; 32];
+        let bytes = self.as_bytes();
+
+        bytes == zero
+    }
+
     /// Compute (self^(2^250-1), self^11), used as a helper function
     /// within invert() and pow22523().
     #[rustfmt::skip] // keep alignment of explanatory comments

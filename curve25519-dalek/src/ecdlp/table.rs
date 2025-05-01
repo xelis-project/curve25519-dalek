@@ -107,8 +107,9 @@ impl From<AffineMontgomeryPoint> for T2MontgomeryCoordinates {
 pub(crate) struct T2LinearTableView<'a>(pub &'a [T2MontgomeryCoordinates]);
 
 impl T2LinearTableView<'_> {
+    #[inline]
     pub fn index(&self, index: usize) -> AffineMontgomeryPoint {
-        let T2MontgomeryCoordinates { u, v } = self.0[index - 1];
+        let T2MontgomeryCoordinates { u, v } = self.0[index];
         AffineMontgomeryPoint::from_bytes(&u, &v)
     }
 }

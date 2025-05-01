@@ -426,12 +426,27 @@ pub fn decode<R: ProgressReportFunction>(
 ) -> Option<i64> {
     let (offset, normalized, num_batches) = decode_prep(precomputed_tables, point, &args, 1, 0);
     let point_iter = make_point_iterator(precomputed_tables, normalized, num_batches);
+
+    // Pre compute the T2 cache
+    let mut t2_cache = [AffineMontgomeryPoint::identity(); BATCH_SIZE];
+    let mut t2_cache_alpha = [FieldElement::ZERO; BATCH_SIZE];
+    {
+        let t2_table = precomputed_tables.get_t2();
+        for (i, (cache, alpha)) in t2_cache.iter_mut().zip(t2_cache_alpha.iter_mut()).enumerate() {
+            let point = t2_table.index(i);
+            *alpha = &MONTGOMERY_A_NEG - &point.u;
+            *cache = point;
+        }
+    }
+
     fast_ecdlp(
         precomputed_tables,
         normalized,
         point_iter,
         args.pseudo_constant_time,
         args.progress_report_function,
+        &t2_cache,
+        &t2_cache_alpha
     )
     .map(|v| v as i64 + offset)
 }
@@ -469,6 +484,18 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
                     }
                 };
 
+                // Pre compute the T2 cache
+                let mut t2_cache = [AffineMontgomeryPoint::identity(); BATCH_SIZE];
+                let mut t2_cache_alpha = [FieldElement::ZERO; BATCH_SIZE];
+                {
+                    let t2_table = precomputed_tables.get_t2();
+                    for (i, (cache, alpha)) in t2_cache.iter_mut().zip(t2_cache_alpha.iter_mut()).enumerate() {
+                        let point = t2_table.index(i);
+                        *alpha = &MONTGOMERY_A_NEG - &point.u;
+                        *cache = point;
+                    }
+                }
+
                 let handle = s.spawn(move || {
                     let point_iter =
                         make_point_iterator(precomputed_tables, normalized, num_batches);
@@ -478,6 +505,8 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
                         point_iter,
                         args.pseudo_constant_time,
                         progress_report,
+                        &t2_cache,
+                        &t2_cache_alpha
                     );
 
                     if !args.pseudo_constant_time && res.is_some() {
@@ -509,9 +538,10 @@ fn fast_ecdlp(
     point_iterator: impl Iterator<Item = (usize, usize, AffineMontgomeryPoint, f64)>,
     pseudo_constant_time: bool,
     progress_report: impl ProgressReportFunction,
+    t2_cache: &[AffineMontgomeryPoint; BATCH_SIZE],
+    t2_cache_alpha: &[FieldElement; BATCH_SIZE],
 ) -> Option<u64> {
     let t1_table = precomputed_tables.get_t1();
-    let t2_table = precomputed_tables.get_t2();
 
     let mut found = None;
     let mut consider_candidate = |m| {
@@ -526,15 +556,16 @@ fn fast_ecdlp(
     let mut batch = [FieldElement::ZERO; BATCH_SIZE];
     'outer: for (index, j_start, target_montgomery, progress) in point_iterator {
         // amortize the potential cost of the report function
-        if index % 256 == 0 {
+        if index % BATCH_SIZE == 0 {
             if let ControlFlow::Break(_) = progress_report.report(progress) {
                 break 'outer;
             }
         }
 
         // Case 0: target is 0. Has to be handled separately.
+        let j_start_shifted = (j_start as i64) << precomputed_tables.get_l1();
         if target_montgomery.is_identity_not_ct() {
-            consider_candidate((j_start as i64) << precomputed_tables.get_l1());
+            consider_candidate(j_start_shifted);
             if !pseudo_constant_time {
                 break 'outer;
             }
@@ -543,10 +574,8 @@ fn fast_ecdlp(
         // Case 2: j=0. Has to be handled separately.
         if t1_table
             .lookup(&target_montgomery.u.as_bytes(), |i| {
-                consider_candidate(((j_start as i64) << precomputed_tables.get_l1()) + i as i64)
-                    || consider_candidate(
-                        ((j_start as i64) << precomputed_tables.get_l1()) - i as i64,
-                    )
+                consider_candidate(j_start_shifted + i as i64)
+                    || consider_candidate(j_start_shifted - i as i64)
             })
             .is_some()
             && !pseudo_constant_time
@@ -557,10 +586,10 @@ fn fast_ecdlp(
         // Z = T2[j]_x - Pm_x
         for (i, batch) in batch.iter_mut().enumerate() {
             let j = i + 1;
-            let t2_point = t2_table.index(j as _);
+            let t2_point = &t2_cache[i];
             let diff = &t2_point.u - &target_montgomery.u;
 
-            if diff == FieldElement::ZERO {
+            if diff.is_zero_not_ct() {
                 // Case 1: (Montgomery addition) exceptional case when T2[j] = Pm.
                 // m1 = j * 2^L1, m2 = -j * 2^L1
                 let found =
@@ -581,10 +610,8 @@ fn fast_ecdlp(
         for (batch_i, nu) in batch.iter().enumerate() {
             let j = batch_i + 1;
             // Montgomery addition: general case
-
-            let t2_point = t2_table.index(j as _);
-
-            let alpha = &(&MONTGOMERY_A_NEG - &t2_point.u) - &target_montgomery.u;
+            let t2_point = &t2_cache[batch_i];
+            let alpha = &t2_cache_alpha[batch_i] - &target_montgomery.u;
 
             // lambda = (T2[j]_y - Pm_y) * nu
             // Q_x = lambda^2 - A - T2[j]_x - Pm_x
@@ -592,12 +619,12 @@ fn fast_ecdlp(
             let qx = &lambda.square() + &alpha;
 
             // Case 3: general case, negative j.
+            let j_start_shifted = (j_start as i64 - j as i64) << precomputed_tables.get_l1();
             if t1_table
                 .lookup(&qx.as_bytes(), |i| {
-                    consider_candidate(
-                        ((j_start as i64 - j as i64) << precomputed_tables.get_l1()) + i as i64,
-                    ) || consider_candidate(
-                        ((j_start as i64 - j as i64) << precomputed_tables.get_l1()) - i as i64,
+                    consider_candidate(j_start_shifted + i as i64)
+                    || consider_candidate(
+                        j_start_shifted - i as i64,
                     )
                 })
                 .is_some()
@@ -614,13 +641,10 @@ fn fast_ecdlp(
             let qx = &lambda.square() + &alpha;
 
             // Case 4: general case, positive j.
+            let j_start_shifted = (j_start as i64 + j as i64) << precomputed_tables.get_l1();
             if t1_table
                 .lookup(&qx.as_bytes(), |i| {
-                    consider_candidate(
-                        ((j_start as i64 + j as i64) << precomputed_tables.get_l1()) + i as i64,
-                    ) || consider_candidate(
-                        ((j_start as i64 + j as i64) << precomputed_tables.get_l1()) - i as i64,
-                    )
+                    consider_candidate(j_start_shifted + i as i64) || consider_candidate(j_start_shifted - i as i64)
                 })
                 .is_some()
             {
@@ -636,6 +660,7 @@ fn fast_ecdlp(
 }
 
 // FIXME(upstrean): should be an impl From<i64> for Scalar
+#[inline]
 fn i64_to_scalar(n: i64) -> Scalar {
     if n >= 0 {
         Scalar::from(n as u64)
@@ -693,7 +718,6 @@ mod tests {
             // take a random point from the coset4
             let coset_i = rand::thread_rng().gen_range(0..4);
             let point = point.coset4()[coset_i];
-            // let point = point.compress().decompress().unwrap();
 
             let res = decode(
                 &view,
@@ -702,7 +726,6 @@ mod tests {
             );
             assert_eq!(res, Some(num as i64));
 
-            println!("tested {num} (coset4[{coset_i}])");
         }
     }
 
@@ -723,8 +746,6 @@ mod tests {
 
             let res = decode(&view, point, ECDLPArguments::new_with_range(0, 1 << 48));
             assert_eq!(res, Some(num as i64));
-
-            println!("tested {num}");
         }
     }
 
