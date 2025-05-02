@@ -186,11 +186,7 @@ pub mod table_generation {
     //! Generate the precomputed tables.
 
     use super::*;
-    use std::{
-        thread,
-        io,
-        sync::atomic::AtomicBool
-    };
+    use std::{io, sync::atomic::AtomicBool, thread};
 
     fn t1_cuckoo_setup<P: ProgressTableGenerationReportFunction>(
         cuckoo_len: usize,
@@ -500,7 +496,7 @@ pub mod table_generation {
                                     {
                                         // Can't easily interrupt from inside thread
                                         interrupted.store(true, Ordering::Relaxed);
-                                        return
+                                        return;
                                     }
                                 }
                             }
@@ -548,11 +544,7 @@ pub mod table_generation {
     /// To prepare `dest`, you should use an mmaped file or a 32-byte aligned byte array.
     /// The byte array length should be the return value of [`table_file_len`].
     /// No progress report will be done.
-    pub fn create_table_file_par(
-        l1: usize,
-        n_threads: usize,
-        dest: &mut [u8],
-    ) -> io::Result<()> {
+    pub fn create_table_file_par(l1: usize, n_threads: usize, dest: &mut [u8]) -> io::Result<()> {
         create_table_file_with_progress_report_par(
             l1,
             n_threads,

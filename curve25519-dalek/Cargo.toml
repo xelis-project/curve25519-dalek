@@ -71,12 +71,11 @@ fiat-crypto = { version = "0.2.1", default-features = false }
 default = ["alloc", "precomputed-tables", "zeroize", "ecdlp"]
 alloc = ["zeroize?/alloc"]
 std = []
-precompute_table_gen = ["alloc"]
 precomputed-tables = []
 legacy_compatibility = []
 group = ["dep:group", "rand_core"]
 group-bits = ["group", "ff/bits"]
-ecdlp = ["std", "dep:bytemuck"]
+ecdlp = ["alloc", "std", "dep:bytemuck"]
 
 [target.'cfg(all(not(curve25519_dalek_backend = "fiat"), not(curve25519_dalek_backend = "serial"), target_arch = "x86_64"))'.dependencies]
 curve25519-dalek-derive = { version = "0.1", path = "../curve25519-dalek-derive" }

@@ -432,7 +432,11 @@ pub fn decode<R: ProgressReportFunction>(
     let mut t2_cache_alpha = [FieldElement::ZERO; BATCH_SIZE];
     {
         let t2_table = precomputed_tables.get_t2();
-        for (i, (cache, alpha)) in t2_cache.iter_mut().zip(t2_cache_alpha.iter_mut()).enumerate() {
+        for (i, (cache, alpha)) in t2_cache
+            .iter_mut()
+            .zip(t2_cache_alpha.iter_mut())
+            .enumerate()
+        {
             let point = t2_table.index(i);
             *alpha = &MONTGOMERY_A_NEG - &point.u;
             *cache = point;
@@ -446,7 +450,7 @@ pub fn decode<R: ProgressReportFunction>(
         args.pseudo_constant_time,
         args.progress_report_function,
         &t2_cache,
-        &t2_cache_alpha
+        &t2_cache_alpha,
     )
     .map(|v| v as i64 + offset)
 }
@@ -489,7 +493,11 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
                 let mut t2_cache_alpha = [FieldElement::ZERO; BATCH_SIZE];
                 {
                     let t2_table = precomputed_tables.get_t2();
-                    for (i, (cache, alpha)) in t2_cache.iter_mut().zip(t2_cache_alpha.iter_mut()).enumerate() {
+                    for (i, (cache, alpha)) in t2_cache
+                        .iter_mut()
+                        .zip(t2_cache_alpha.iter_mut())
+                        .enumerate()
+                    {
                         let point = t2_table.index(i);
                         *alpha = &MONTGOMERY_A_NEG - &point.u;
                         *cache = point;
@@ -506,7 +514,7 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
                         args.pseudo_constant_time,
                         progress_report,
                         &t2_cache,
-                        &t2_cache_alpha
+                        &t2_cache_alpha,
                     );
 
                     if !args.pseudo_constant_time && res.is_some() {
@@ -623,9 +631,7 @@ fn fast_ecdlp(
             if t1_table
                 .lookup(&qx.as_bytes(), |i| {
                     consider_candidate(j_start_shifted + i as i64)
-                    || consider_candidate(
-                        j_start_shifted - i as i64,
-                    )
+                        || consider_candidate(j_start_shifted - i as i64)
                 })
                 .is_some()
             {
@@ -644,7 +650,8 @@ fn fast_ecdlp(
             let j_start_shifted = (j_start as i64 + j as i64) << precomputed_tables.get_l1();
             if t1_table
                 .lookup(&qx.as_bytes(), |i| {
-                    consider_candidate(j_start_shifted + i as i64) || consider_candidate(j_start_shifted - i as i64)
+                    consider_candidate(j_start_shifted + i as i64)
+                        || consider_candidate(j_start_shifted - i as i64)
                 })
                 .is_some()
             {
@@ -725,7 +732,6 @@ mod tests {
                 ECDLPArguments::new_with_range(0, 1 << 48),
             );
             assert_eq!(res, Some(num as i64));
-
         }
     }
 
