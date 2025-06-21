@@ -60,6 +60,8 @@ subtle = { version = "2.6.0", default-features = false, features = ["const-gener
 serde = { version = "1.0", default-features = false, optional = true, features = ["derive"] }
 zeroize = { version = "1", default-features = false, optional = true }
 bytemuck = { version = "1.14.0", features = ["derive"], optional = true }
+rayon = "1.8"
+wide = { version = "0.7.32", optional = true }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 cpufeatures = "0.2.6"
@@ -68,9 +70,10 @@ cpufeatures = "0.2.6"
 fiat-crypto = { version = "0.2.1", default-features = false }
 
 [features]
-default = ["alloc", "precomputed-tables", "zeroize", "ecdlp"]
+default = ["alloc", "precomputed-tables", "zeroize", "ecdlp", "simd"]
 alloc = ["zeroize?/alloc"]
 std = []
+simd = ["wide"]
 precompute_table_gen = ["alloc"]
 precomputed-tables = []
 legacy_compatibility = []

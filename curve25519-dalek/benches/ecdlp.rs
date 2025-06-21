@@ -9,47 +9,49 @@ use std::{path::Path, time::Duration};
 
 pub fn ecdlp_bench(c: &mut Criterion) {
     if !Path::new("ecdlp_table.bin").exists() {
-        let tables = ECDLPTables::generate(26).unwrap();
+        let tables = ECDLPTables::generate_par(29, 16).unwrap();
         tables.write_to_file("ecdlp_table.bin").unwrap();
     }
 
-    let tables = ECDLPTables::load_from_file(26, "ecdlp_table.bin").unwrap();
+    let tables = ECDLPTables::load_from_file(29, "ecdlp_table.bin").unwrap();
     let view = tables.view();
 
-    c.bench_function("fast ecdlp non constant time", |b| {
-        let num = 1u64 << 46;
-        let point = Scalar::from(num) * G;
-        b.iter(|| {
-            let res = ecdlp::decode(
-                &view,
-                black_box(point),
-                ECDLPArguments::new_with_range(0, 1 << 48).pseudo_constant_time(true),
-            );
-            assert_eq!(res, Some(num as i64));
-        });
-    });
+    // c.bench_function("fast ecdlp non constant time", |b| {
+    //     let num = 1u64 << 46;
+    //     let point = Scalar::from(num) * G;
+    //     b.iter(|| {
+    //         let res = ecdlp::decode(
+    //             &view,
+    //             black_box(point),
+    //             ECDLPArguments::new_with_range(0, 1 << 48).pseudo_constant_time(true),
+    //         );
+    //         assert_eq!(res, Some(num as i64));
+    //     });
+    // });
 
     c.bench_function("fast ecdlp", |b| {
-        let num = rand::thread_rng().gen_range(0u64..(1 << 48));
+        // let num = rand::thread_rng().gen_range(0u64..(1 << 48));
+        let num = 250000000_u64;
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::decode(
                 &view,
                 black_box(point),
-                ECDLPArguments::new_with_range(0, 1 << 48).pseudo_constant_time(false),
+                ECDLPArguments::new_with_range(0,  1 << 48).pseudo_constant_time(false),
             );
             assert_eq!(res, Some(num as i64));
         });
     });
 
     c.bench_function("par fast ecdlp T=1", |b| {
-        let num = rand::thread_rng().gen_range(0u64..(1 << 48));
+        // let num = rand::thread_rng().gen_range(0u64..(1 << 48));
+        let num: u64 = 100_000 * 100_000_000;
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::par_decode(
                 &view,
                 black_box(point),
-                ECDLPArguments::new_with_range(0, 1 << 48)
+                ECDLPArguments::new_with_range(0, 1 << 63)
                     .n_threads(1),
             );
             assert_eq!(res, Some(num as i64));
@@ -57,7 +59,8 @@ pub fn ecdlp_bench(c: &mut Criterion) {
     });
 
     c.bench_function("par fast ecdlp T=2", |b| {
-        let num = rand::thread_rng().gen_range(0u64..(1 << 48));
+        // let num = rand::thread_rng().gen_range(0u64..(1 << 48));
+        let num = 250000000000_u64;
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::par_decode(
@@ -71,7 +74,8 @@ pub fn ecdlp_bench(c: &mut Criterion) {
     });
 
     c.bench_function("par fast ecdlp T=4", |b| {
-        let num = rand::thread_rng().gen_range(0u64..(1 << 48));
+        // let num = rand::thread_rng().gen_range(0u64..(1 << 48));
+        let num = 250000000000_u64;
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::par_decode(
@@ -85,13 +89,14 @@ pub fn ecdlp_bench(c: &mut Criterion) {
     });
 
     c.bench_function("par fast ecdlp T=8", |b| {
-        let num = rand::thread_rng().gen_range(0u64..(1 << 48));
-        let point = Scalar::from(num) * G;
+      // let num = rand::thread_rng().gen_range(0u64..(1 << 48));
+      let num: u64 = 100_000 * 100_000_000;
+      let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::par_decode(
                 &view,
                 black_box(point),
-                ECDLPArguments::new_with_range(0, 1 << 48)
+                ECDLPArguments::new_with_range(0, 1 << 63)
                     .n_threads(8),
             );
             assert_eq!(res, Some(num as i64));
@@ -99,13 +104,14 @@ pub fn ecdlp_bench(c: &mut Criterion) {
     });
 
     c.bench_function("par fast ecdlp T=16", |b| {
-        let num = rand::thread_rng().gen_range(0u64..(1 << 48));
+        // let num = rand::thread_rng().gen_range(0u64..(1 << 48));
+        let num: u64 = 100_000 * 100_000_000;
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::par_decode(
                 &view,
                 black_box(point),
-                ECDLPArguments::new_with_range(0, 1 << 48)
+                ECDLPArguments::new_with_range(0, 1 << 63)
                     .n_threads(16),
             );
             assert_eq!(res, Some(num as i64));
