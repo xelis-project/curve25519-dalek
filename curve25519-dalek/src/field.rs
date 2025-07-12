@@ -169,6 +169,7 @@ impl FieldElement {
     /// # Return
     ///
     /// If zero, return `true`.  Otherwise, return `false`.
+    #[cfg(feature = "ecdlp")]
     pub(crate) fn is_zero_not_ct(&self) -> bool {
         let zero = [0u8; 32];
         let bytes = self.to_bytes();
