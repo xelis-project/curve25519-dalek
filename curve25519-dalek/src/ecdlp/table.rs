@@ -97,8 +97,8 @@ impl From<T2MontgomeryCoordinates> for AffineMontgomeryPoint {
 impl From<AffineMontgomeryPoint> for T2MontgomeryCoordinates {
     fn from(e: AffineMontgomeryPoint) -> Self {
         Self {
-            u: e.u.as_bytes(),
-            v: e.v.as_bytes(),
+            u: e.u.to_bytes(),
+            v: e.v.to_bytes(),
         }
     }
 }
@@ -220,7 +220,7 @@ pub mod table_generation {
             }
 
             for j in 0..CUCKOO_MAX_INSERT_SWAPS {
-                let x = all_entries[v as usize].as_ref();
+                let x = &all_entries[v as usize];
                 let start = (old_hash_id as usize - 1) * 8;
                 let end = start + 4;
                 let mut key = u32::from_be_bytes(x[end..end + 4].try_into().expect("key u32"));
@@ -281,7 +281,7 @@ pub mod table_generation {
                 }
             }
 
-            all_entries.push(point.u.as_bytes());
+            all_entries.push(point.u.to_bytes());
             acc = acc.addition_not_ct(&step);
         }
 
@@ -381,7 +381,7 @@ pub mod table_generation {
                         let mut chunk_entries = Vec::with_capacity(end_idx - start_idx);
 
                         for i in start_idx..end_idx {
-                            chunk_entries.push(acc.u.as_bytes());
+                            chunk_entries.push(acc.u.to_bytes());
 
                             if i % report_every == 0 {
                                 let old_count = progress_counter.fetch_add(1, Ordering::Relaxed);

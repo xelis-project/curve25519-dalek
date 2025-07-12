@@ -581,7 +581,7 @@ fn fast_ecdlp(
 
         // Case 2: j=0. Has to be handled separately.
         if t1_table
-            .lookup(&target_montgomery.u.as_bytes(), |i| {
+            .lookup(&target_montgomery.u.to_bytes(), |i| {
                 consider_candidate(j_start_shifted + i as i64)
                     || consider_candidate(j_start_shifted - i as i64)
             })
@@ -629,7 +629,7 @@ fn fast_ecdlp(
             // Case 3: general case, negative j.
             let j_start_shifted = (j_start as i64 - j as i64) << precomputed_tables.get_l1();
             if t1_table
-                .lookup(&qx.as_bytes(), |i| {
+                .lookup(&qx.to_bytes(), |i| {
                     consider_candidate(j_start_shifted + i as i64)
                         || consider_candidate(j_start_shifted - i as i64)
                 })
@@ -649,7 +649,7 @@ fn fast_ecdlp(
             // Case 4: general case, positive j.
             let j_start_shifted = (j_start as i64 + j as i64) << precomputed_tables.get_l1();
             if t1_table
-                .lookup(&qx.as_bytes(), |i| {
+                .lookup(&qx.to_bytes(), |i| {
                     consider_candidate(j_start_shifted + i as i64)
                         || consider_candidate(j_start_shifted - i as i64)
                 })
@@ -684,7 +684,7 @@ mod tests {
     };
 
     use super::*;
-    use rand::Rng;
+    use rand::{rng, Rng};
 
     const L1: usize = 26;
 
@@ -717,13 +717,13 @@ mod tests {
         let view = tables.view();
 
         for i in (0..(1u64 << 48)).step_by(1 << L1).take(1 << 12) {
-            let delta = rand::thread_rng().gen_range(0..(1 << L1));
+            let delta = rng().random_range(0..(1 << L1));
 
             let num = i + delta;
             let point = RistrettoPoint::mul_base(&Scalar::from(num));
 
             // take a random point from the coset4
-            let coset_i = rand::thread_rng().gen_range(0..4);
+            let coset_i = rng().random_range(0..4);
             let point = point.coset4()[coset_i];
 
             let res = decode(
@@ -744,7 +744,7 @@ mod tests {
             let num = i; // rand::thread_rng().gen_range(0u64..(1 << 48));
             let mut point = RistrettoPoint::mul_base(&Scalar::from(num));
 
-            if rand::thread_rng().gen() {
+            if rng().random() {
                 // do a round of compression/decompression to mess up the Z and Ts
                 // & ecdlp will need to clear the cofactor
                 point = point.compress().decompress().unwrap();

@@ -106,6 +106,6 @@ mod tests {
             FieldElement::sqrt_ratio_i(&(&MONTGOMERY_A + &two), &FieldElement::MINUS_ONE);
         assert!(bool::from(is_sq));
 
-        assert_eq!(edwards_to_montgomery_alpha().as_bytes(), v.as_bytes());
+        assert_eq!(edwards_to_montgomery_alpha().to_bytes(), v.to_bytes());
     }
 }
