@@ -58,7 +58,7 @@ impl Display for InternalError {
             InternalError::PointDecompression => write!(f, "Cannot decompress Edwards point"),
             InternalError::ScalarFormat => write!(f, "Cannot use scalar with high-bit set"),
             InternalError::BytesLength { name: n, length: l } => {
-                write!(f, "{} must be {} bytes in length", n, l)
+                write!(f, "{n} must be {l} bytes in length")
             }
             InternalError::Verify => write!(f, "Verification equation was not satisfied"),
             #[cfg(feature = "batch")]
@@ -71,9 +71,8 @@ impl Display for InternalError {
                 length_c: lc,
             } => write!(
                 f,
-                "Arrays must be the same length: {} has length {},
-                              {} has length {}, {} has length {}.",
-                na, la, nb, lb, nc, lc
+                "Arrays must be the same length: {na} has length {la},
+                              {nb} has length {lb}, {nc} has length {lc}.",
             ),
             #[cfg(feature = "digest")]
             InternalError::PrehashedContextLength => write!(
