@@ -5,7 +5,7 @@
 //!
 //! The algorithm depends on a constant `L1` parameter, which enables changing the space/time tradeoff.
 //! To use a given `L1` constant, you need to generate a precomputed tables file, or download a pre-generated one.
-//! The resulting file may be quite big, which is why it is recommanded to load it at runtime using [`ecdlp::ECDLPTablesFile`].
+//! The resulting file may be quite big, which is why it is recommended to load it at runtime using [`ecdlp::ECDLPTablesFile`].
 //!
 //! The algorithm works for any range, but keep in mind that the time the algorithm takes grows exponentially: with the same
 //! precomputed tables, decoding an `n+1`-bit integer will take 2x as long as an `n`-bit integer. By default, unless the "pseudo"
@@ -91,8 +91,8 @@ mod affine_montgomery;
 mod table;
 
 use crate::{
-    constants::MONTGOMERY_A_NEG, constants::RISTRETTO_BASEPOINT_POINT as G, field::FieldElement,
-    RistrettoPoint, Scalar,
+    RistrettoPoint, Scalar, constants::MONTGOMERY_A_NEG, constants::RISTRETTO_BASEPOINT_POINT as G,
+    field::FieldElement,
 };
 use affine_montgomery::AffineMontgomeryPoint;
 use core::{
@@ -101,14 +101,14 @@ use core::{
 };
 
 pub use table::{
-    table_generation, ECDLPTablesFileView, NoOpProgressTableGenerationReportFunction,
-    ProgressTableGenerationReportFunction, ReportStep,
+    ECDLPTablesFileView, NoOpProgressTableGenerationReportFunction,
+    ProgressTableGenerationReportFunction, ReportStep, table_generation,
 };
 
 use table::{BATCH_SIZE, L2};
 
 /// A trait to represent progress report functions.
-/// It is auto-implemented on any `F: Fn(f64) -> ConstrolFlow<()>`.
+/// It is auto-implemented on any `F: Fn(f64) -> ControlFlow<()>`.
 pub trait ProgressReportFunction {
     /// Run the progress report function.
     fn report(&self, progress: f64) -> ControlFlow<()>;
@@ -466,7 +466,7 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
 ) -> Option<i64> {
     let end_flag = AtomicBool::new(false);
 
-    let res = std::thread::scope(|s| {
+    std::thread::scope(|s| {
         let handles = (0..args.n_threads)
             .map(|thread_i| {
                 let (offset, normalized, num_batches) =
@@ -504,7 +504,7 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
                     }
                 }
 
-                let handle = s.spawn(move || {
+                s.spawn(move || {
                     let point_iter =
                         make_point_iterator(precomputed_tables, normalized, num_batches);
                     let res = fast_ecdlp(
@@ -522,9 +522,7 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
                     }
 
                     res.map(|v| offset + v as i64)
-                });
-
-                handle
+                })
             })
             .collect::<Vec<_>>();
 
@@ -535,9 +533,7 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
         }
 
         res
-    });
-
-    res
+    })
 }
 
 fn fast_ecdlp(
@@ -684,7 +680,7 @@ mod tests {
     };
 
     use super::*;
-    use rand::{rng, Rng};
+    use rand::{Rng, rng};
 
     const L1: usize = 26;
 

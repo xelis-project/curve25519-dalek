@@ -1,10 +1,10 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use curve25519_dalek::{
+    Scalar,
     constants::RISTRETTO_BASEPOINT_POINT as G,
     ecdlp::{self, ECDLPArguments, ECDLPTables},
-    Scalar,
 };
-use rand::{rng, Rng};
+use rand::{Rng, rng};
 use std::{path::Path, time::Duration};
 
 pub fn ecdlp_bench(c: &mut Criterion) {

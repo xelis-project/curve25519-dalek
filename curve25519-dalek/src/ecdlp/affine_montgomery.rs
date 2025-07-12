@@ -1,4 +1,4 @@
-use crate::{constants::MONTGOMERY_A, field::FieldElement, EdwardsPoint};
+use crate::{EdwardsPoint, constants::MONTGOMERY_A, field::FieldElement};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct AffineMontgomeryPoint {

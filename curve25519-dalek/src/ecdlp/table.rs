@@ -25,7 +25,7 @@ pub(crate) const CUCKOO_K: usize = 3; // number of cuckoo lookups before giving 
 // Note: file layout is just T2 followed by T1 keys and then T1 values.
 // We just do casts using `bytemuck` since everything are PODs.
 
-/// A view into an ECDLP precomputed table. This is a wrapper around a read-only byte array, which you could back by an mmaped file, for example.
+/// A view into an ECDLP precomputed table. This is a wrapper around a read-only byte array, which you could back by an memory mapped file, for example.
 pub struct ECDLPTablesFileView<'a> {
     bytes: &'a [u8],
     l1: usize,
@@ -533,7 +533,7 @@ pub mod table_generation {
     }
 
     /// Generate the ECDLP precomputed tables file.
-    /// To prepare `dest`, you should use an mmaped file or a 32-byte aligned byte array.
+    /// To prepare `dest`, you should use an memory mapped file or a 32-byte aligned byte array.
     /// The byte array length should be the return value of [`table_file_len`].
     /// No progress report will be done.
     pub fn create_table_file(l1: usize, dest: &mut [u8]) -> io::Result<()> {
@@ -541,7 +541,7 @@ pub mod table_generation {
     }
 
     /// Generate the ECDLP precomputed tables file, with multithreading.
-    /// To prepare `dest`, you should use an mmaped file or a 32-byte aligned byte array.
+    /// To prepare `dest`, you should use an memory mapped file or a 32-byte aligned byte array.
     /// The byte array length should be the return value of [`table_file_len`].
     /// No progress report will be done.
     pub fn create_table_file_par(l1: usize, n_threads: usize, dest: &mut [u8]) -> io::Result<()> {
@@ -554,7 +554,7 @@ pub mod table_generation {
     }
 
     /// Generate the ECDLP precomputed tables file.
-    /// To prepare `dest`, you should use an mmaped file or a 32-byte aligned byte array.
+    /// To prepare `dest`, you should use an memory mapped file or a 32-byte aligned byte array.
     /// The byte array length should be the return value of [`table_file_len`].
     /// This function will report progress using the provided function.
     pub fn create_table_file_with_progress_report<P: ProgressTableGenerationReportFunction>(
@@ -568,7 +568,7 @@ pub mod table_generation {
     }
 
     /// Generate the ECDLP precomputed tables file, with multithreading.
-    /// To prepare `dest`, you should use an mmaped file or a 32-byte aligned byte array.
+    /// To prepare `dest`, you should use an memory mapped file or a 32-byte aligned byte array.
     /// The byte array length should be the return value of [`table_file_len`].
     /// This function will report progress using the provided function.
     pub fn create_table_file_with_progress_report_par<
