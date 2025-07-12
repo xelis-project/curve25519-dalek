@@ -171,7 +171,7 @@ impl FieldElement {
     /// If zero, return `true`.  Otherwise, return `false`.
     pub(crate) fn is_zero_not_ct(&self) -> bool {
         let zero = [0u8; 32];
-        let bytes = self.as_bytes();
+        let bytes = self.to_bytes();
 
         bytes == zero
     }
