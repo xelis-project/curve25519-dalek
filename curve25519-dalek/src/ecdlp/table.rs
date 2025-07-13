@@ -25,7 +25,7 @@ pub(crate) const CUCKOO_K: usize = 3; // number of cuckoo lookups before giving 
 // Note: file layout is just T2 followed by T1 keys and then T1 values.
 // We just do casts using `bytemuck` since everything are PODs.
 
-/// A view into an ECDLP precomputed table. This is a wrapper around a read-only byte array, which you could back by an mmaped file, for example.
+/// A view into an ECDLP precomputed table. This is a wrapper around a read-only byte array, which you could back by an memory mapped file, for example.
 pub struct ECDLPTablesFileView<'a> {
     bytes: &'a [u8],
     l1: usize,
@@ -97,8 +97,8 @@ impl From<T2MontgomeryCoordinates> for AffineMontgomeryPoint {
 impl From<AffineMontgomeryPoint> for T2MontgomeryCoordinates {
     fn from(e: AffineMontgomeryPoint) -> Self {
         Self {
-            u: e.u.as_bytes(),
-            v: e.v.as_bytes(),
+            u: e.u.to_bytes(),
+            v: e.v.to_bytes(),
         }
     }
 }
@@ -107,8 +107,9 @@ impl From<AffineMontgomeryPoint> for T2MontgomeryCoordinates {
 pub(crate) struct T2LinearTableView<'a>(pub &'a [T2MontgomeryCoordinates]);
 
 impl T2LinearTableView<'_> {
+    #[inline]
     pub fn index(&self, index: usize) -> AffineMontgomeryPoint {
-        let T2MontgomeryCoordinates { u, v } = self.0[index - 1];
+        let T2MontgomeryCoordinates { u, v } = self.0[index];
         AffineMontgomeryPoint::from_bytes(&u, &v)
     }
 }
@@ -185,11 +186,7 @@ pub mod table_generation {
     //! Generate the precomputed tables.
 
     use super::*;
-    use std::{
-        thread,
-        io,
-        sync::atomic::AtomicBool
-    };
+    use std::{io, sync::atomic::AtomicBool, thread};
 
     fn t1_cuckoo_setup<P: ProgressTableGenerationReportFunction>(
         cuckoo_len: usize,
@@ -223,7 +220,7 @@ pub mod table_generation {
             }
 
             for j in 0..CUCKOO_MAX_INSERT_SWAPS {
-                let x = all_entries[v as usize].as_ref();
+                let x = &all_entries[v as usize];
                 let start = (old_hash_id as usize - 1) * 8;
                 let end = start + 4;
                 let mut key = u32::from_be_bytes(x[end..end + 4].try_into().expect("key u32"));
@@ -284,7 +281,7 @@ pub mod table_generation {
                 }
             }
 
-            all_entries.push(point.u.as_bytes());
+            all_entries.push(point.u.to_bytes());
             acc = acc.addition_not_ct(&step);
         }
 
@@ -384,7 +381,7 @@ pub mod table_generation {
                         let mut chunk_entries = Vec::with_capacity(end_idx - start_idx);
 
                         for i in start_idx..end_idx {
-                            chunk_entries.push(acc.u.as_bytes());
+                            chunk_entries.push(acc.u.to_bytes());
 
                             if i % report_every == 0 {
                                 let old_count = progress_counter.fetch_add(1, Ordering::Relaxed);
@@ -499,7 +496,7 @@ pub mod table_generation {
                                     {
                                         // Can't easily interrupt from inside thread
                                         interrupted.store(true, Ordering::Relaxed);
-                                        return
+                                        return;
                                     }
                                 }
                             }
@@ -536,7 +533,7 @@ pub mod table_generation {
     }
 
     /// Generate the ECDLP precomputed tables file.
-    /// To prepare `dest`, you should use an mmaped file or a 32-byte aligned byte array.
+    /// To prepare `dest`, you should use an memory mapped file or a 32-byte aligned byte array.
     /// The byte array length should be the return value of [`table_file_len`].
     /// No progress report will be done.
     pub fn create_table_file(l1: usize, dest: &mut [u8]) -> io::Result<()> {
@@ -544,14 +541,10 @@ pub mod table_generation {
     }
 
     /// Generate the ECDLP precomputed tables file, with multithreading.
-    /// To prepare `dest`, you should use an mmaped file or a 32-byte aligned byte array.
+    /// To prepare `dest`, you should use an memory mapped file or a 32-byte aligned byte array.
     /// The byte array length should be the return value of [`table_file_len`].
     /// No progress report will be done.
-    pub fn create_table_file_par(
-        l1: usize,
-        n_threads: usize,
-        dest: &mut [u8],
-    ) -> io::Result<()> {
+    pub fn create_table_file_par(l1: usize, n_threads: usize, dest: &mut [u8]) -> io::Result<()> {
         create_table_file_with_progress_report_par(
             l1,
             n_threads,
@@ -561,7 +554,7 @@ pub mod table_generation {
     }
 
     /// Generate the ECDLP precomputed tables file.
-    /// To prepare `dest`, you should use an mmaped file or a 32-byte aligned byte array.
+    /// To prepare `dest`, you should use an memory mapped file or a 32-byte aligned byte array.
     /// The byte array length should be the return value of [`table_file_len`].
     /// This function will report progress using the provided function.
     pub fn create_table_file_with_progress_report<P: ProgressTableGenerationReportFunction>(
@@ -575,7 +568,7 @@ pub mod table_generation {
     }
 
     /// Generate the ECDLP precomputed tables file, with multithreading.
-    /// To prepare `dest`, you should use an mmaped file or a 32-byte aligned byte array.
+    /// To prepare `dest`, you should use an memory mapped file or a 32-byte aligned byte array.
     /// The byte array length should be the return value of [`table_file_len`].
     /// This function will report progress using the provided function.
     pub fn create_table_file_with_progress_report_par<

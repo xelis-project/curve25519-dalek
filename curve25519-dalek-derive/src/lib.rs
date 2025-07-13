@@ -203,10 +203,7 @@ fn process_mod(
                                         };
 
                                         let feature = feature.value();
-                                        if !spec_features
-                                            .iter()
-                                            .any(|enabled_feature| feature == *enabled_feature)
-                                        {
+                                        if !spec_features.contains(&feature) {
                                             *item = syn::Item::Verbatim(Default::default());
                                             continue 'next_item;
                                         }
@@ -311,7 +308,7 @@ fn process_function(
     let function_name = function.sig.ident;
     let function_return = function.sig.output;
     let function_inner_name =
-        syn::Ident::new(&format!("_impl_{}", function_name), function_name.span());
+        syn::Ident::new(&format!("_impl_{function_name}"), function_name.span());
     let function_args = function.sig.inputs;
     let function_body = function.block;
     let mut function_call_args = Vec::new();
@@ -357,7 +354,7 @@ fn process_function(
                         unsupported_if_some!(pat_wild.attrs.first());
 
                         let ident = syn::Ident::new(
-                            &format!("__arg_{}__", index),
+                            &format!("__arg_{index}__"),
                             pat_wild.underscore_token.span(),
                         );
                         function_args_inner.push(arg.clone());
@@ -423,7 +420,7 @@ fn process_function(
         let (outer_impl_generics, outer_ty_generics, outer_where_clause) =
             generics.split_for_impl();
         let trait_ident =
-            syn::Ident::new(&format!("__Impl_{}__", function_name), function_name.span());
+            syn::Ident::new(&format!("__Impl_{function_name}__"), function_name.span());
         let item_trait = quote::quote! {
             #[allow(non_camel_case_types)]
             trait #trait_ident #outer_impl_generics #outer_where_clause {
