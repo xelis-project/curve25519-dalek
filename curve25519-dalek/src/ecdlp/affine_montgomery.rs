@@ -70,8 +70,8 @@ impl AffineMontgomeryPoint {
 // Constant comes from https://ristretto.group/details/isogenies.html (birational mapping from E2 = E_(a2,d2) to M_(B,A))
 // alpha = sqrt((A + 2) / (B * a_2)) with B = 1 and a_2 = -1.
 const ALPHA: FieldElement = FieldElement::from_bytes(&[
-    6, 126, 69, 255, 170, 4, 110, 204, 130, 26, 125, 75, 209, 211, 161, 197, 126, 79, 252, 3,
-    220, 8, 123, 210, 187, 6, 160, 96, 244, 237, 38, 15,
+    6, 126, 69, 255, 170, 4, 110, 204, 130, 26, 125, 75, 209, 211, 161, 197, 126, 79, 252, 3, 220,
+    8, 123, 210, 187, 6, 160, 96, 244, 237, 38, 15,
 ]);
 
 impl From<&'_ EdwardsPoint> for AffineMontgomeryPoint {
