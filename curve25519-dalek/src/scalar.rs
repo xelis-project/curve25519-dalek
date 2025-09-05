@@ -1927,7 +1927,7 @@ pub(crate) mod test {
             let mut dst = vec![0; expected.len()];
             read_le_u64_into(src, &mut dst);
 
-            assert_eq!(&dst, expected, "Expected {:x?} got {:x?}", expected, dst);
+            assert_eq!(&dst, expected, "Expected {expected:x?} got {dst:x?}");
         }
     }
 

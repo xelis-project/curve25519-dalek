@@ -2448,8 +2448,8 @@ mod test {
                 }
             };
 
-            let computed = EdwardsPoint::hash_to_curve::<sha2::Sha512>(&[&input], &[dst]);
-            assert_eq!(computed, expected_output, "Failed in test {}", index);
+            let computed = EdwardsPoint::hash_to_curve::<sha2::Sha512>(&[input], &[dst]);
+            assert_eq!(computed, expected_output, "Failed in test {index}");
         }
     }
 }

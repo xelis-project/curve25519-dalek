@@ -111,7 +111,7 @@ where
     if hex_str.len() % 2 == 1 {
         hex_str.insert(0, '0');
     }
-    hex::decode(hex_str).map_err(|e| SError::custom(format!("{:?}", e)))
+    hex::decode(hex_str).map_err(|e| SError::custom(format!("{e:?}")))
 }
 
 fn get_test_vectors() -> impl Iterator<Item = TestVector> {
@@ -219,13 +219,11 @@ fn find_validation_criteria() {
         }
     }
 
-    println!("VERIFY_ALLOWED_EDGECASES: {:?}", verify_allowed_edgecases);
+    println!("VERIFY_ALLOWED_EDGECASES: {verify_allowed_edgecases:?}");
     println!(
-        "VERIFY_STRICT_ALLOWED_EDGECASES: {:?}",
-        verify_strict_allowed_edgecases
+        "VERIFY_STRICT_ALLOWED_EDGECASES: {verify_strict_allowed_edgecases:?}"
     );
     println!(
-        "re-encoded k && low-order A yielded a valid signature {}/{} of the time",
-        num_lucky_reencoded_k, num_reencoded_k
+        "re-encoded k && low-order A yielded a valid signature {num_lucky_reencoded_k}/{num_reencoded_k} of the time"
     );
 }

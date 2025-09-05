@@ -63,7 +63,7 @@ mod vectors {
             line = l.unwrap();
 
             let parts: Vec<&str> = line.split(':').collect();
-            assert_eq!(parts.len(), 5, "wrong number of fields in line {}", lineno);
+            assert_eq!(parts.len(), 5, "wrong number of fields in line {lineno}");
 
             let sec_bytes: Vec<u8> = FromHex::from_hex(parts[0]).unwrap();
             let pub_bytes: Vec<u8> = FromHex::from_hex(parts[1]).unwrap();
@@ -82,18 +82,16 @@ mod vectors {
             let sig1: Signature = Signature::try_from(&sig_bytes[..64]).unwrap();
             let sig2: Signature = signing_key.sign(&msg_bytes);
 
-            assert!(sig1 == sig2, "Signature bytes not equal on line {}", lineno);
+            assert!(sig1 == sig2, "Signature bytes not equal on line {lineno}");
             assert!(
                 signing_key.verify(&msg_bytes, &sig2).is_ok(),
-                "Signature verification failed on line {}",
-                lineno
+                "Signature verification failed on line {lineno}"
             );
             assert!(
                 expected_verifying_key
                     .verify_strict(&msg_bytes, &sig2)
                     .is_ok(),
-                "Signature strict verification failed on line {}",
-                lineno
+                "Signature strict verification failed on line {lineno}"
             );
         }
     }
