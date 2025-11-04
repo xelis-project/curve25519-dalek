@@ -1,5 +1,5 @@
 [workspace]
-members = [ "aided-decode",
+members = [
     "curve25519-dalek",
     "curve25519-dalek-derive",
     "ed25519-dalek",
