@@ -1,4 +1,4 @@
-use crate::{constants::MONTGOMERY_A, field::FieldElement, EdwardsPoint};
+use crate::{EdwardsPoint, constants::MONTGOMERY_A, field::FieldElement};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct AffineMontgomeryPoint {
@@ -187,22 +187,17 @@ impl AffineMontgomeryPoint {
     }
 }
 
-// FIXME(upstream): FieldElement::from_bytes should probably be const
 // see test for correctness of this const
-fn edwards_to_montgomery_alpha() -> FieldElement {
-    // Constant comes from https://ristretto.group/details/isogenies.html (birational mapping from E2 = E_(a2,d2) to M_(B,A))
-    // alpha = sqrt((A + 2) / (B * a_2)) with B = 1 and a_2 = -1.
-    FieldElement::from_bytes(&[
-        6, 126, 69, 255, 170, 4, 110, 204, 130, 26, 125, 75, 209, 211, 161, 197, 126, 79, 252, 3,
-        220, 8, 123, 210, 187, 6, 160, 96, 244, 237, 38, 15,
-    ])
-}
+// Constant comes from https://ristretto.group/details/isogenies.html (birational mapping from E2 = E_(a2,d2) to M_(B,A))
+// alpha = sqrt((A + 2) / (B * a_2)) with B = 1 and a_2 = -1.
+const ALPHA: FieldElement = FieldElement::from_bytes(&[
+    6, 126, 69, 255, 170, 4, 110, 204, 130, 26, 125, 75, 209, 211, 161, 197, 126, 79, 252, 3, 220,
+    8, 123, 210, 187, 6, 160, 96, 244, 237, 38, 15,
+]);
 
 impl From<&'_ EdwardsPoint> for AffineMontgomeryPoint {
     #[allow(non_snake_case)]
     fn from(eddy: &EdwardsPoint) -> Self {
-        let ALPHA = edwards_to_montgomery_alpha();
-
         // u = (1+y)/(1-y) = (Z+Y)/(Z-Y),
         // v = (1+y)/(x(1-y)) * alpha = (Z+Y)/(X-T) * alpha.
         let Z_plus_Y = &eddy.Z + &eddy.Y;
@@ -227,6 +222,6 @@ mod tests {
             FieldElement::sqrt_ratio_i(&(&MONTGOMERY_A + &two), &FieldElement::MINUS_ONE);
         assert!(bool::from(is_sq));
 
-        assert_eq!(edwards_to_montgomery_alpha().as_bytes(), v.as_bytes());
+        assert_eq!(ALPHA.to_bytes(), v.to_bytes());
     }
 }

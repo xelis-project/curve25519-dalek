@@ -82,14 +82,6 @@ This crate exposes an `#[unsafe_target_feature]` macro which works just like `#[
 it moves the `unsafe` from the function prototype into the macro name, and can be used on safe functions.
 
 ```rust
-// ERROR: `#[target_feature(..)]` can only be applied to `unsafe` functions
-// on versions < 1.86.0
-#[target_feature(enable = "avx2")]
-fn func() {}
-```
-
-```rust
-// It works, but must be `unsafe`
 # #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "avx2")]
 unsafe fn func() {}

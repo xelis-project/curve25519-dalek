@@ -5,7 +5,7 @@
 //!
 //! The algorithm depends on a constant `L1` parameter, which enables changing the space/time tradeoff.
 //! To use a given `L1` constant, you need to generate a precomputed tables file, or download a pre-generated one.
-//! The resulting file may be quite big, which is why it is recommanded to load it at runtime using [`ecdlp::ECDLPTablesFile`].
+//! The resulting file may be quite big, which is why it is recommended to load it at runtime using [`ecdlp::ECDLPTablesFile`].
 //!
 //! The algorithm works for any range, but keep in mind that the time the algorithm takes grows exponentially: with the same
 //! precomputed tables, decoding an `n+1`-bit integer will take 2x as long as an `n`-bit integer. By default, unless the "pseudo"
@@ -92,8 +92,8 @@ mod table;
 mod field_simd;
 
 use crate::{
-    constants::MONTGOMERY_A_NEG, constants::RISTRETTO_BASEPOINT_POINT as G, field::FieldElement,
-    RistrettoPoint, Scalar,
+    RistrettoPoint, Scalar, constants::MONTGOMERY_A_NEG, constants::RISTRETTO_BASEPOINT_POINT as G,
+    field::FieldElement,
 };
 use affine_montgomery::AffineMontgomeryPoint;
 use core::{
@@ -102,14 +102,14 @@ use core::{
 };
 
 pub use table::{
-    table_generation, ECDLPTablesFileView, NoOpProgressTableGenerationReportFunction,
-    ProgressTableGenerationReportFunction, ReportStep,
+    ECDLPTablesFileView, NoOpProgressTableGenerationReportFunction,
+    ProgressTableGenerationReportFunction, ReportStep, table_generation,
 };
 
 use table::{BATCH_SIZE, L2};
 
 /// A trait to represent progress report functions.
-/// It is auto-implemented on any `F: Fn(f64) -> ConstrolFlow<()>`.
+/// It is auto-implemented on any `F: Fn(f64) -> ControlFlow<()>`.
 pub trait ProgressReportFunction {
     /// Run the progress report function.
     fn report(&self, progress: f64) -> ControlFlow<()>;
@@ -490,11 +490,16 @@ pub fn decode<R: ProgressReportFunction>(
     let (offset, normalized, num_batches) = decode_prep(precomputed_tables, point, &args, 1, 0);
     let point_iter = make_point_iterator(precomputed_tables, normalized, num_batches);
 
+    // Pre compute the T2 cache
     let mut t2_cache = [AffineMontgomeryPoint::identity(); BATCH_SIZE];
     let mut t2_cache_alpha = [FieldElement::ZERO; BATCH_SIZE];
     {
         let t2_table = precomputed_tables.get_t2();
-        for (i, (cache, alpha)) in t2_cache.iter_mut().zip(t2_cache_alpha.iter_mut()).enumerate() {
+        for (i, (cache, alpha)) in t2_cache
+            .iter_mut()
+            .zip(t2_cache_alpha.iter_mut())
+            .enumerate()
+        {
             let point = t2_table.index(i);
             *alpha = &MONTGOMERY_A_NEG - &point.u;
             *cache = point;
@@ -509,7 +514,7 @@ pub fn decode<R: ProgressReportFunction>(
         &AtomicBool::new(false),
         args.progress_report_function,
         &t2_cache,
-        &t2_cache_alpha
+        &t2_cache_alpha,
     )
     .map(|v| v as i64 + offset)
 }
@@ -991,7 +996,7 @@ fn fast_ecdlp(
 
         // Case 2: j=0. Has to be handled separately.
         if t1_table
-            .lookup(&target_montgomery.u.as_bytes(), |i| {
+            .lookup(&target_montgomery.u.to_bytes(), |i| {
                 consider_candidate(j_start_shifted + i as i64)
                     || consider_candidate(j_start_shifted - i as i64)
             })
@@ -1028,7 +1033,6 @@ fn fast_ecdlp(
         for (batch_i, nu) in batch.iter().enumerate() {
             let j = batch_i + 1;
             // Montgomery addition: general case
-
             let t2_point = &t2_cache[batch_i];
             let alpha = &t2_cache_alpha[batch_i] - &target_montgomery.u;
 
@@ -1066,8 +1070,9 @@ fn fast_ecdlp(
             // Case 4: general case, positive j.
             let j_start_shifted = (j_start as i64 + j as i64) << precomputed_tables.get_l1();
             if t1_table
-                .lookup(&qx.as_bytes(), |i| {
-                    consider_candidate(j_start_shifted + i as i64) || consider_candidate(j_start_shifted - i as i64)
+                .lookup(&qx.to_bytes(), |i| {
+                    consider_candidate(j_start_shifted + i as i64)
+                        || consider_candidate(j_start_shifted - i as i64)
                 })
                 .is_some()
             {

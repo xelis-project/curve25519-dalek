@@ -27,9 +27,10 @@ mod vectors {
         scalar::Scalar,
         traits::IsIdentity,
     };
+    use rand_core::TryRngCore;
 
     #[cfg(not(feature = "digest"))]
-    use sha2::{digest::Digest, Sha512};
+    use sha2::{Sha512, digest::Digest};
 
     use std::{
         fs::File,
@@ -62,7 +63,7 @@ mod vectors {
             line = l.unwrap();
 
             let parts: Vec<&str> = line.split(':').collect();
-            assert_eq!(parts.len(), 5, "wrong number of fields in line {}", lineno);
+            assert_eq!(parts.len(), 5, "wrong number of fields in line {lineno}");
 
             let sec_bytes: Vec<u8> = FromHex::from_hex(parts[0]).unwrap();
             let pub_bytes: Vec<u8> = FromHex::from_hex(parts[1]).unwrap();
@@ -81,18 +82,16 @@ mod vectors {
             let sig1: Signature = Signature::try_from(&sig_bytes[..64]).unwrap();
             let sig2: Signature = signing_key.sign(&msg_bytes);
 
-            assert!(sig1 == sig2, "Signature bytes not equal on line {}", lineno);
+            assert!(sig1 == sig2, "Signature bytes not equal on line {lineno}");
             assert!(
                 signing_key.verify(&msg_bytes, &sig2).is_ok(),
-                "Signature verification failed on line {}",
-                lineno
+                "Signature verification failed on line {lineno}"
             );
             assert!(
                 expected_verifying_key
                     .verify_strict(&msg_bytes, &sig2)
                     .is_ok(),
-                "Signature strict verification failed on line {}",
-                lineno
+                "Signature strict verification failed on line {lineno}"
             );
         }
     }
@@ -104,7 +103,9 @@ mod vectors {
         let sec_bytes = hex!("833fe62409237b9d62ec77587520911e9a759cec1d19755b7da901b96dca3d42");
         let pub_bytes = hex!("ec172b93ad5e563bf4932c70e1245034c35467ef2efd4d64ebf819683467e2bf");
         let msg_bytes = hex!("616263");
-        let sig_bytes = hex!("98a70222f0b8121aa9d30f813d683f809e462b469c7ff87639499bb94e6dae4131f85042463c2a355a2003d062adf5aaa10b8c61e636062aaad11c2a26083406");
+        let sig_bytes = hex!(
+            "98a70222f0b8121aa9d30f813d683f809e462b469c7ff87639499bb94e6dae4131f85042463c2a355a2003d062adf5aaa10b8c61e636062aaad11c2a26083406"
+        );
 
         let signing_key = SigningKey::from_bytes(&sec_bytes);
         let expected_verifying_key = VerifyingKey::from_bytes(&pub_bytes).unwrap();
@@ -180,7 +181,7 @@ mod vectors {
 
     // Pick a random Scalar
     fn non_null_scalar() -> Scalar {
-        let mut rng = rand::rngs::OsRng;
+        let mut rng = rand::rngs::OsRng.unwrap_err();
         let mut s_candidate = Scalar::random(&mut rng);
         while s_candidate == Scalar::ZERO {
             s_candidate = Scalar::random(&mut rng);
@@ -268,27 +269,31 @@ mod vectors {
         let signature = serialize_signature(&r, &s);
         let vk = VerifyingKey::from_bytes(pubkey.compress().as_bytes()).unwrap();
         let sig = Signature::try_from(&signature[..]).unwrap();
-        assert!(vk
-            .verify_prehashed(message1.clone(), context_str, &sig)
-            .is_ok());
-        assert!(vk
-            .verify_prehashed(message2.clone(), context_str, &sig)
-            .is_ok());
+        assert!(
+            vk.verify_prehashed(message1.clone(), context_str, &sig)
+                .is_ok()
+        );
+        assert!(
+            vk.verify_prehashed(message2.clone(), context_str, &sig)
+                .is_ok()
+        );
 
         // Check that verify_prehashed_strict fails on both sigs
-        assert!(vk
-            .verify_prehashed_strict(message1.clone(), context_str, &sig)
-            .is_err());
-        assert!(vk
-            .verify_prehashed_strict(message2.clone(), context_str, &sig)
-            .is_err());
+        assert!(
+            vk.verify_prehashed_strict(message1.clone(), context_str, &sig)
+                .is_err()
+        );
+        assert!(
+            vk.verify_prehashed_strict(message2.clone(), context_str, &sig)
+                .is_err()
+        );
     }
 }
 
 #[cfg(feature = "rand_core")]
 mod integrations {
     use super::*;
-    use rand::rngs::OsRng;
+    use rand::{TryRngCore, rngs::OsRng};
     use std::collections::HashMap;
 
     #[test]
@@ -298,7 +303,7 @@ mod integrations {
         let good: &[u8] = "test message".as_bytes();
         let bad: &[u8] = "wrong message".as_bytes();
 
-        let mut csprng = OsRng;
+        let mut csprng = OsRng.unwrap_err();
 
         let signing_key: SigningKey = SigningKey::generate(&mut csprng);
         let verifying_key = signing_key.verifying_key();
@@ -336,11 +341,55 @@ mod integrations {
 
     #[cfg(feature = "digest")]
     #[test]
+    fn sign_verify_digest_equivalence() {
+        // TestSignVerify
+
+        let mut csprng = OsRng.unwrap_err();
+
+        let good: &[u8] = "test message".as_bytes();
+        let bad: &[u8] = "wrong message".as_bytes();
+
+        let keypair: SigningKey = SigningKey::generate(&mut csprng);
+        let good_sig: Signature = keypair.sign(good);
+        let bad_sig: Signature = keypair.sign(bad);
+
+        let mut verifier = keypair.verify_stream(&good_sig).unwrap();
+        verifier.update(good);
+        assert!(
+            verifier.finalize_and_verify().is_ok(),
+            "Verification of a valid signature failed!"
+        );
+
+        let mut verifier = keypair.verify_stream(&bad_sig).unwrap();
+        verifier.update(good);
+        assert!(
+            verifier.finalize_and_verify().is_err(),
+            "Verification of a signature on a different message passed!"
+        );
+
+        let mut verifier = keypair.verify_stream(&good_sig).unwrap();
+        verifier.update("test ");
+        verifier.update("message");
+        assert!(
+            verifier.finalize_and_verify().is_ok(),
+            "Verification of a valid signature failed!"
+        );
+
+        let mut verifier = keypair.verify_stream(&good_sig).unwrap();
+        verifier.update(bad);
+        assert!(
+            verifier.finalize_and_verify().is_err(),
+            "Verification of a signature on a different message passed!"
+        );
+    }
+
+    #[cfg(feature = "digest")]
+    #[test]
     fn ed25519ph_sign_verify() {
         let good: &[u8] = b"test message";
         let bad: &[u8] = b"wrong message";
 
-        let mut csprng = OsRng;
+        let mut csprng = OsRng.unwrap_err();
 
         // ugh… there's no `impl Copy for Sha512`… i hope we can all agree these are the same hashes
         let mut prehashed_good1: Sha512 = Sha512::default();
@@ -415,7 +464,7 @@ mod integrations {
             b"Fuck dumbin' it down, spit ice, skip jewellery: Molotov cocktails on me like accessories.",
             b"Hey, I never cared about your bucks, so if I run up with a mask on, probably got a gas can too.",
             b"And I'm not here to fill 'er up. Nope, we came to riot, here to incite, we don't want any of your stuff.", ];
-        let mut csprng = OsRng;
+        let mut csprng = OsRng.unwrap_err();
         let mut signing_keys: Vec<SigningKey> = Vec::new();
         let mut signatures: Vec<Signature> = Vec::new();
 
@@ -434,7 +483,7 @@ mod integrations {
 
     #[test]
     fn public_key_hash_trait_check() {
-        let mut csprng = OsRng {};
+        let mut csprng = OsRng.unwrap_err();
         let secret: SigningKey = SigningKey::generate(&mut csprng);
         let public_from_secret: VerifyingKey = (&secret).into();
 
@@ -461,7 +510,7 @@ mod integrations {
 
     #[test]
     fn montgomery_and_edwards_conversion() {
-        let mut rng = rand::rngs::OsRng;
+        let mut rng = rand::rngs::OsRng.unwrap_err();
         let signing_key = SigningKey::generate(&mut rng);
         let verifying_key = signing_key.verifying_key();
 
