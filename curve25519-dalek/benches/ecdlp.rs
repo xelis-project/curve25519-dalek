@@ -1,10 +1,10 @@
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use curve25519_dalek::{
-    Scalar,
     constants::RISTRETTO_BASEPOINT_POINT as G,
     ecdlp::{self, ECDLPArguments, ECDLPTables},
+    Scalar,
 };
-use rand::{Rng, rng};
+use rand::Rng;
 use std::{path::Path, time::Duration};
 
 pub fn ecdlp_bench(c: &mut Criterion) {
@@ -16,7 +16,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
     let tables = ECDLPTables::load_from_file(26, "ecdlp_table.bin").unwrap();
     let view = tables.view();
 
-    const TEST_VAL: u64 = 9_223_372_036_854_775_806/10000;
+    const TEST_VAL: u64 = 9_223_372_036_854_775_806/300000;
 
     // c.bench_function("fast ecdlp non constant time", |b| {
     //     let num = 1u64 << 46;
@@ -59,22 +59,10 @@ pub fn ecdlp_bench(c: &mut Criterion) {
         });
     });
 
-    c.bench_function("fast ecdlp", |b| {
-        let num = rng().random_range(0u64..(1 << 48));
-        let point = Scalar::from(num) * G;
-        b.iter(|| {
-            let res = ecdlp::par_decode_j_batch(
-                &view,
-                black_box(point),
-                ECDLPArguments::new_with_range(0, 1 << 63)
-                    .n_threads(1),
-            );
-            assert_eq!(res, Some(num as i64));
-        });
-    });
 
-    c.bench_function("par fast ecdlp T=1", |b| {
-        let num = rng().random_range(0u64..(1 << 48));
+    c.bench_function("par fast ecdlp T=1 scalar", |b| {
+        // let num = rand::thread_rng().gen_range(0u64..(1 << 48));
+        let num: u64 = TEST_VAL;
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::par_decode_scalar(
@@ -88,7 +76,39 @@ pub fn ecdlp_bench(c: &mut Criterion) {
     });
 
     c.bench_function("par fast ecdlp T=2", |b| {
-        let num = rng().random_range(0u64..(1 << 48));
+        // let num = rand::thread_rng().gen_range(0u64..(1 << 48));
+        let num: u64 = TEST_VAL;
+        let point = Scalar::from(num) * G;
+        b.iter(|| {
+            let res = ecdlp::par_decode(
+                &view,
+                black_box(point),
+                ECDLPArguments::new_with_range(0, 1 << 63)
+                    .n_threads(2),
+            );
+            assert_eq!(res, Some(num as i64));
+        });
+    });
+
+
+    c.bench_function("par fast ecdlp T=2 scalar", |b| {
+        // let num = rand::thread_rng().gen_range(0u64..(1 << 48));
+        let num: u64 = TEST_VAL;
+        let point = Scalar::from(num) * G;
+        b.iter(|| {
+            let res = ecdlp::par_decode_scalar(
+                &view,
+                black_box(point),
+                ECDLPArguments::new_with_range(0, 1 << 63)
+                    .n_threads(2),
+            );
+            assert_eq!(res, Some(num as i64));
+        });
+    });
+
+    c.bench_function("par fast ecdlp T=4", |b| {
+        // let num = rand::thread_rng().gen_range(0u64..(1 << 48));
+        let num: u64 = TEST_VAL;
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::par_decode(
@@ -101,11 +121,12 @@ pub fn ecdlp_bench(c: &mut Criterion) {
         });
     });
 
-    c.bench_function("par fast ecdlp T=4", |b| {
-        let num = rng().random_range(0u64..(1 << 48));
+    c.bench_function("par fast ecdlp T=4 scalar", |b| {
+        // let num = rand::thread_rng().gen_range(0u64..(1 << 48));
+        let num: u64 = TEST_VAL;
         let point = Scalar::from(num) * G;
         b.iter(|| {
-            let res = ecdlp::par_decode_j_batch(
+            let res = ecdlp::par_decode_scalar(
                 &view,
                 black_box(point),
                 ECDLPArguments::new_with_range(0, 1 << 63)
@@ -116,25 +137,41 @@ pub fn ecdlp_bench(c: &mut Criterion) {
     });
 
     c.bench_function("par fast ecdlp T=8", |b| {
-        let num = rng().random_range(0u64..(1 << 48));
+        // let num = rand::thread_rng().gen_range(0u64..(1 << 48));
+        let num: u64 = TEST_VAL;
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::par_decode(
                 &view,
                 black_box(point),
                 ECDLPArguments::new_with_range(0, 1 << 63)
-                    .n_threads(16),
+                    .n_threads(8),
             );
             assert_eq!(res, Some(num as i64));
         });
     });
 
-    c.bench_function("par fast ecdlp T=16 j_batch", |b| {
+    c.bench_function("par fast ecdlp T=8 scalar", |b| {
         // let num = rand::thread_rng().gen_range(0u64..(1 << 48));
         let num: u64 = TEST_VAL;
         let point = Scalar::from(num) * G;
         b.iter(|| {
-            let res = ecdlp::par_decode_j_batch(
+            let res = ecdlp::par_decode_scalar(
+                &view,
+                black_box(point),
+                ECDLPArguments::new_with_range(0, 1 << 63)
+                    .n_threads(8),
+            );
+            assert_eq!(res, Some(num as i64));
+        });
+    });
+
+    c.bench_function("par fast ecdlp T=16", |b| {
+        // let num = rand::thread_rng().gen_range(0u64..(1 << 48));
+        let num: u64 = TEST_VAL;
+        let point = Scalar::from(num) * G;
+        b.iter(|| {
+            let res = ecdlp::par_decode(
                 &view,
                 black_box(point),
                 ECDLPArguments::new_with_range(0, 1 << 63)
@@ -173,7 +210,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
     });
 
     c.bench_function(&format!("fast ecdlp for number < {}", (1i64 << 47)), |b| {
-        let num = rng().random_range(0u64..(1 << 47));
+        let num = rand::thread_rng().gen_range(0u64..(1 << 47));
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::decode(
@@ -188,7 +225,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
     c.bench_function(
         &format!("fast ecdlp for number < {} T=2", (1i64 << 47)),
         |b| {
-            let num = rng().random_range(0u64..(1 << 47));
+            let num = rand::thread_rng().gen_range(0u64..(1 << 47));
             let point = Scalar::from(num) * G;
             b.iter(|| {
                 let res = ecdlp::par_decode(
@@ -202,7 +239,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
     );
 
     c.bench_function(&format!("fast ecdlp for number < {}", (1i64 << 44)), |b| {
-        let num = rng().random_range(0u64..(1 << 44));
+        let num = rand::thread_rng().gen_range(0u64..(1 << 44));
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::decode(
@@ -215,7 +252,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
     });
 
     c.bench_function(&format!("fast ecdlp for number < {}", (1i64 << 43)), |b| {
-        let num = rng().random_range(0u64..(1 << 43));
+        let num = rand::thread_rng().gen_range(0u64..(1 << 43));
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::decode(
@@ -228,7 +265,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
     });
 
     c.bench_function(&format!("fast ecdlp for number < {}", (1i64 << 26)), |b| {
-        let num = rng().random_range(0u64..(1 << 26));
+        let num = rand::thread_rng().gen_range(0u64..(1 << 26));
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::decode(
@@ -241,7 +278,7 @@ pub fn ecdlp_bench(c: &mut Criterion) {
     });
 
     c.bench_function(&format!("fast ecdlp for number < {}", (1i64 << 27)), |b| {
-        let num = rng().random_range(0u64..(1 << 27));
+        let num = rand::thread_rng().gen_range(0u64..(1 << 27));
         let point = Scalar::from(num) * G;
         b.iter(|| {
             let res = ecdlp::decode(
