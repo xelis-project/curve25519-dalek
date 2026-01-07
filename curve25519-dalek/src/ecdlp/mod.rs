@@ -609,7 +609,7 @@ fn fast_ecdlp(
         }
 
         // nu = Z^-1
-        FieldElement::batch_invert(&mut batch);
+        FieldElement::invert_batch(&mut batch);
 
         for (batch_i, nu) in batch.iter().enumerate() {
             let j = batch_i + 1;
