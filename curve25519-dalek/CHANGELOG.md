@@ -5,6 +5,23 @@ major series.
 
 ## 5.x series
 
+## 5.0.0-pre.4
+
+* Add allocation-free `EdwardsPoint::compress_batch()`
+* Perf: Use maximum available NAF window size in `VartimePrecomputedStraus`
+* Upgrade `rand_core` dependency to v0.10.0-rc-3
+
+## 5.0.0-pre.3
+
+* Add Lizard bytes-to-point injection for Ristretto. Gated under `lizard` feature.
+* Upgrade `rand_core` dependency to v0.10.0-rc-2
+
+## 5.0.0-pre.1
+
+* Rename `Scalar::batch_invert` -> `Scalar::invert_batch` for consistency. Also make it no-alloc.
+* Add an allocating batch inversion called `Scalar::invert_batch_alloc`.
+* Add `Scalar::div_by_2`
+
 ## 5.0.0-pre.0
 
 * Update edition to 2024
@@ -15,7 +32,9 @@ major series.
 
 ## 4.x series
 
-### 4.2.0
+### 4.2.0 [YANKED]
+
+NOTE: yanked because `hash_to_curve` was improperly implemented (#785)
 
 * Move AVX-512 backend selection logic to a separate CFG flag that requires nightly
 * Add Elligator2 hashing methods `EdwardsPoint::hash_to_curve()` and `FieldElement::hash_to_field()`

@@ -85,7 +85,7 @@
 //! successful decompression of a compressed point, or else by
 //! operations on other (valid) `EdwardsPoint`s.
 //!
-//! [curve_models]: https://docs.rs/curve25519-dalek/latest/curve25519-dalek/backend/serial/curve_models/index.html
+//! [curve_models]: https://docs.rs/curve25519-dalek/latest/curve25519_dalek/backend/serial/curve_models/index.html
 
 // We allow non snake_case names because coordinates in projective space are
 // traditionally denoted by the capitalisation of their respective
@@ -117,7 +117,7 @@ use {
     subtle::CtOption,
 };
 
-#[cfg(any(test, feature = "rand_core"))]
+#[cfg(feature = "rand_core")]
 use rand_core::RngCore;
 
 use subtle::Choice;
@@ -599,7 +599,7 @@ impl EdwardsPoint {
 
         // Compute the denominators in a batch
         let mut denominators = eds.iter().map(|p| &p.Z - &p.Y).collect::<Vec<_>>();
-        FieldElement::batch_invert(&mut denominators);
+        FieldElement::invert_batch_alloc(&mut denominators);
 
         // Now compute the Montgomery u coordinate for every point
         let mut ret = Vec::with_capacity(eds.len());
@@ -618,10 +618,22 @@ impl EdwardsPoint {
 
     /// Compress several `EdwardsPoint`s into `CompressedEdwardsY` format, using a batch inversion
     /// for a significant speedup.
+    pub fn compress_batch<const N: usize>(inputs: &[EdwardsPoint; N]) -> [CompressedEdwardsY; N] {
+        let mut zs: [_; N] = core::array::from_fn(|i| inputs[i].Z);
+        FieldElement::invert_batch(&mut zs);
+
+        core::array::from_fn(|i| {
+            let x = &inputs[i].X * &zs[i];
+            let y = &inputs[i].Y * &zs[i];
+            AffinePoint { x, y }.compress()
+        })
+    }
+    /// Compress several `EdwardsPoint`s into `CompressedEdwardsY` format, using a batch inversion
+    /// for a significant speedup.
     #[cfg(feature = "alloc")]
-    pub fn compress_batch(inputs: &[EdwardsPoint]) -> Vec<CompressedEdwardsY> {
+    pub fn compress_batch_alloc(inputs: &[EdwardsPoint]) -> Vec<CompressedEdwardsY> {
         let mut zs = inputs.iter().map(|input| input.Z).collect::<Vec<_>>();
-        FieldElement::batch_invert(&mut zs);
+        FieldElement::invert_batch_alloc(&mut zs);
 
         inputs
             .iter()
@@ -635,11 +647,89 @@ impl EdwardsPoint {
     }
 
     #[cfg(feature = "digest")]
-    /// Perform hashing to curve, with explicit hash function and domain separator, `domain_sep`,
-    /// using the suite `edwards25519_XMD:SHA-512_ELL2_NU_`. The input is the concatenation of the
-    /// elements of `bytes`. Likewise for the domain separator with `domain_sep`. At least one
-    /// element of `domain_sep`, MUST be nonempty, and the concatenation MUST NOT exceed
+    // The function `map_to_curve` calculates an [EdwardsPoint] from a [FieldElement].
+    fn map_to_curve(fe: FieldElement) -> EdwardsPoint {
+        let c1 = ED25519_SQRTAM2;
+
+        // 1.  (xMn, xMd, yMn, yMd) = map_to_curve_elligator2_curve25519(u)
+        let (xMn, xMd, yMn, yMd) = crate::montgomery::elligator_encode(&fe);
+        // 2.  xn = xMn * yMd
+        let xn = &xMn * &yMd;
+        // 3.  xn = xn * c1
+        let xn = &xn * &c1;
+        // 4.  xd = xMd * yMn
+        let xd = &xMd * &yMn;
+        // 5.  yn = xMn - xMd
+        let yn = &xMn - &xMd;
+        // 6.  yd = xMn + xMd
+        let yd = &xMn + &xMd;
+        // 7. tv1 = xd * yd
+        let tv1 = &xd * &yd;
+        // 8.   e = tv1 == 0
+        let e = tv1.ct_eq(&FieldElement::ZERO);
+        // 9.  xn = CMOV(xn, 0, e)
+        let xn = FieldElement::conditional_select(&xn, &FieldElement::ZERO, e);
+        // 10. xd = CMOV(xd, 1, e)
+        let xd = FieldElement::conditional_select(&xd, &FieldElement::ONE, e);
+        // 11. yn = CMOV(yn, 1, e)
+        let yn = FieldElement::conditional_select(&yn, &FieldElement::ONE, e);
+        // 12. yd = CMOV(yd, 1, e)
+        let yd = FieldElement::conditional_select(&yd, &FieldElement::ONE, e);
+        // 13. return (xn, xd, yn, yd)
+
+        EdwardsPoint {
+            X: &xn * &yd,
+            Y: &xd * &yn,
+            Z: &xd * &yd,
+            T: &xn * &yn,
+        }
+    }
+
+    #[cfg(feature = "digest")]
+    /// Perform encode to curve per RFC 9380, with explicit hash function and domain separator
+    /// `domain_sep`, using the Twisted Edwards Elligator 2 method. The input is the concatenation
+    /// of the elements of `bytes`. Likewise for the domain separator with `domain_sep`. At least
+    /// one element of `domain_sep`, MUST be nonempty, and the concatenation MUST NOT exceed 255
+    /// bytes.
+    ///
+    /// The specification names SHA-512 as an example of a secure hash to use with this function,
+    /// but you may use any 512-bit hash within reason (see the
+    /// [`spec`](https://www.rfc-editor.org/rfc/rfc9380.html#section-5.2) for details).
+    ///
+    /// # Warning
+    /// `encode_to_curve` is a nonuniform encoding from byte strings to points in `G`. That is,
+    /// the distribution of its output is not uniformly random in `G`: the set of possible outputs
+    /// of encode_to_curve is only a fraction of the points in `G`, and some points in this set
+    /// are more likely to be output than others.
+    ///
+    /// If your application needs the distribution of the output to be statistically close to
+    /// uniform in `G`, use [Self::hash_to_curve] instead.
+    ///
+    /// # Panics
+    /// Panics if `domain_sep.collect().len() == 0` or `> 255`
+    pub fn encode_to_curve<D>(bytes: &[&[u8]], domain_sep: &[&[u8]]) -> EdwardsPoint
+    where
+        D: BlockSizeUser + Default + FixedOutput<OutputSize = U64> + HashMarker,
+        D::BlockSize: IsGreater<D::OutputSize, Output = True>,
+    {
+        // For reference see
+        // https://www.rfc-editor.org/rfc/rfc9380.html#name-elligator-2-method-2
+
+        let fe = FieldElement::hash_to_field::<D, 1>(bytes, domain_sep);
+        let Q = Self::map_to_curve(fe[0]);
+        Q.mul_by_cofactor()
+    }
+
+    #[cfg(feature = "digest")]
+    /// Perform a hash to curve per RFC 9380, with explicit hash function and domain separator
+    /// `domain_sep`, using the Twisted Edwards Elligator 2 method. The input is the concatenation
+    /// of the elements of `bytes`. Likewise for the domain separator with `domain_sep`. At least
+    /// one element of `domain_sep`, MUST be nonempty, and the concatenation MUST NOT exceed
     /// 255 bytes.
+    ///
+    /// The specification names SHA-512 as an example of a secure hash to use with this function,
+    /// but you may use any 512-bit hash within reason (see the
+    /// [`spec`](https://www.rfc-editor.org/rfc/rfc9380.html#section-5.2) for details).
     ///
     /// # Panics
     /// Panics if `domain_sep.collect().len() == 0` or `> 255`
@@ -651,34 +741,12 @@ impl EdwardsPoint {
         // For reference see
         // https://www.rfc-editor.org/rfc/rfc9380.html#name-elligator-2-method-2
 
-        let fe = FieldElement::hash_to_field::<D>(bytes, domain_sep);
-        let (M1, is_sq) = crate::montgomery::elligator_encode(&fe);
+        let fe = FieldElement::hash_to_field::<D, 2>(bytes, domain_sep);
+        let Q0 = Self::map_to_curve(fe[0]);
+        let Q1 = Self::map_to_curve(fe[1]);
 
-        // The `to_edwards` conversion we're performing takes as input the sign of the Edwards
-        // `y` coordinate. However, the specification uses `is_sq` to determine the sign of the
-        // Montgomery `v` coordinate. Our approach reconciles this mismatch as follows:
-        //
-        // * We arbitrarily fix the sign of the Edwards `y` coordinate (we choose 0).
-        // * Using the Montgomery `u` coordinate and the Edwards `X` coordinate, we recover `v`.
-        // * We verify that the sign of `v` matches the expected one, i.e., `is_sq == mont_v.is_negative()`.
-        // * If it does not match, we conditionally negate to correct the sign.
-        //
-        // Note: This logic aligns with the RFC draft specification:
-        //     https://www.rfc-editor.org/rfc/rfc9380.html#name-elligator-2-method-2
-        // followed by the mapping
-        //     https://www.rfc-editor.org/rfc/rfc9380.html#name-mappings-for-twisted-edward
-        // The only difference is that our `elligator_encode` returns only the Montgomery `u` coordinate,
-        // so we apply this workaround to reconstruct and validate the sign.
-
-        let mut E1_opt = M1
-            .to_edwards(0)
-            .expect("Montgomery conversion to Edwards point in Elligator failed");
-
-        // Now we recover v, to ensure that we got the sign right.
-        let mont_v =
-            &(&ED25519_SQRTAM2 * &FieldElement::from_bytes(&M1.to_bytes())) * &E1_opt.X.invert();
-        E1_opt.X.conditional_negate(is_sq ^ mont_v.is_negative());
-        E1_opt.mul_by_cofactor()
+        let R = Q0 + Q1;
+        R.mul_by_cofactor()
     }
 
     /// Return an `EdwardsPoint` chosen uniformly at random using a user-provided RNG.
@@ -695,7 +763,7 @@ impl EdwardsPoint {
     ///
     /// Uses rejection sampling, generating a random `CompressedEdwardsY` and then attempting point
     /// decompression, rejecting invalid points.
-    #[cfg(any(test, feature = "rand_core"))]
+    #[cfg(feature = "rand_core")]
     pub fn random<R: RngCore + ?Sized>(rng: &mut R) -> Self {
         let mut repr = CompressedEdwardsY([0u8; 32]);
         loop {
@@ -1723,7 +1791,7 @@ impl CofactorGroup for EdwardsPoint {
 mod test {
     use super::*;
 
-    use rand_core::TryRngCore;
+    use rand::TryRngCore;
 
     #[cfg(feature = "alloc")]
     use alloc::vec::Vec;
@@ -2012,7 +2080,7 @@ mod test {
     /// Check that mul_base_clamped and mul_clamped agree
     #[test]
     fn mul_base_clamped() {
-        let mut csprng = rand_core::OsRng;
+        let mut csprng = rand::rngs::SysRng;
 
         // Make a random curve point in the curve. Give it torsion to make things interesting.
         #[cfg(feature = "precomputed-tables")]
@@ -2119,30 +2187,49 @@ mod test {
             CompressedEdwardsY::identity()
         );
 
+        assert_eq!(
+            EdwardsPoint::compress_batch(&[EdwardsPoint::identity()]),
+            [CompressedEdwardsY::identity()]
+        );
         #[cfg(feature = "alloc")]
-        {
-            let compressed = EdwardsPoint::compress_batch(&[EdwardsPoint::identity()]);
-            assert_eq!(&compressed, &[CompressedEdwardsY::identity()]);
-        }
+        assert_eq!(
+            &EdwardsPoint::compress_batch_alloc(&[EdwardsPoint::identity()]),
+            &[CompressedEdwardsY::identity()]
+        );
     }
 
-    #[cfg(feature = "alloc")]
+    #[cfg(feature = "rand_core")]
     #[test]
     fn compress_batch() {
         let mut rng = rand::rng();
 
         // TODO(tarcieri): proptests?
-        // Make some points deterministically then randomly
-        let mut points = (1u64..16)
-            .map(|n| constants::ED25519_BASEPOINT_POINT * Scalar::from(n))
-            .collect::<Vec<_>>();
-        points.extend(core::iter::repeat_with(|| EdwardsPoint::random(&mut rng)).take(100));
-        let compressed = EdwardsPoint::compress_batch(&points);
+
+        // Make some test points deterministically then randomly
+        const TEST_VEC_LEN: usize = 117;
+        let points: [EdwardsPoint; TEST_VEC_LEN] = core::array::from_fn(|i| {
+            if i < 17 {
+                // The first 17 are multiple of the basepoint
+                constants::ED25519_BASEPOINT_POINT * Scalar::from(i as u64)
+            } else {
+                // The rest are random
+                EdwardsPoint::random(&mut rng)
+            }
+        });
+
+        // Compress the points individually. This is our reference result
+        let expected_compressed = core::array::from_fn(|i| points[i].compress());
 
         // Check that the batch-compressed points match the individually compressed ones
-        for (point, compressed) in points.iter().zip(&compressed) {
-            assert_eq!(&point.compress(), compressed);
-        }
+        assert_eq!(EdwardsPoint::compress_batch(&points), expected_compressed);
+
+        // Check that the batch-compressed (with alloc) points match the individually compressed
+        // ones
+        #[cfg(feature = "alloc")]
+        assert_eq!(
+            EdwardsPoint::compress_batch_alloc(&points),
+            expected_compressed
+        );
     }
 
     #[test]
@@ -2183,7 +2270,7 @@ mod test {
     }
 
     // A single iteration of a consistency check for MSM.
-    #[cfg(feature = "alloc")]
+    #[cfg(all(feature = "alloc", feature = "rand_core"))]
     fn multiscalar_consistency_iter(n: usize) {
         let mut rng = rand::rng();
 
@@ -2210,7 +2297,7 @@ mod test {
     // parameters.
 
     #[test]
-    #[cfg(feature = "alloc")]
+    #[cfg(all(feature = "alloc", feature = "rand_core"))]
     fn multiscalar_consistency_n_100() {
         let iters = 50;
         for _ in 0..iters {
@@ -2219,7 +2306,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "alloc")]
+    #[cfg(all(feature = "alloc", feature = "rand_core"))]
     fn multiscalar_consistency_n_250() {
         let iters = 50;
         for _ in 0..iters {
@@ -2228,7 +2315,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "alloc")]
+    #[cfg(all(feature = "alloc", feature = "rand_core"))]
     fn multiscalar_consistency_n_500() {
         let iters = 50;
         for _ in 0..iters {
@@ -2237,7 +2324,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "alloc")]
+    #[cfg(all(feature = "alloc", feature = "rand_core"))]
     fn multiscalar_consistency_n_1000() {
         let iters = 50;
         for _ in 0..iters {
@@ -2246,7 +2333,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "alloc")]
+    #[cfg(all(feature = "alloc", feature = "rand_core"))]
     fn batch_to_montgomery() {
         let mut rng = rand::rng();
 
@@ -2271,7 +2358,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "alloc")]
+    #[cfg(all(feature = "alloc", feature = "rand_core"))]
     fn vartime_precomputed_vs_nonprecomputed_multiscalar() {
         let mut rng = rand::rng();
 
@@ -2387,10 +2474,10 @@ mod test {
     }
 
     // Hash-to-curve test vectors from
-    // https://www.rfc-editor.org/rfc/rfc9380.html#name-edwards25519_xmdsha-512_ell2
+    // https://www.rfc-editor.org/rfc/rfc9380.html#appendix-J.5.2
     // These are of the form (input_msg, output_x, output_y)
     #[cfg(all(feature = "alloc", feature = "digest"))]
-    const RFC_HASH_TO_CURVE_KAT: &[(&[u8], &str, &str)] = &[
+    const RFC_ENCODE_TO_CURVE_KAT: &[(&[u8], &str, &str)] = &[
         (
             b"",
             "1ff2b70ecf862799e11b7ae744e3489aa058ce805dd323a936375a84695e76da",
@@ -2424,32 +2511,88 @@ mod test {
         )
     ];
 
+    #[cfg(all(feature = "alloc", feature = "digest"))]
+    fn hex_str_to_fe(hex_str: &str) -> FieldElement {
+        let mut bytes = hex::decode(hex_str).unwrap().to_vec();
+        bytes.reverse();
+        FieldElement::from_bytes(&bytes.try_into().unwrap())
+    }
+
+    #[test]
+    #[cfg(all(feature = "alloc", feature = "digest"))]
+    fn elligator_encode_to_curve_test_vectors() {
+        let dst = b"QUUX-V01-CS02-with-edwards25519_XMD:SHA-512_ELL2_NU_";
+        for (index, vector) in RFC_ENCODE_TO_CURVE_KAT.iter().enumerate() {
+            let input = vector.0;
+
+            let expected_output = {
+                let x = hex_str_to_fe(vector.1);
+                let y = hex_str_to_fe(vector.2);
+                AffinePoint { x, y }.to_edwards()
+            };
+
+            let computed = EdwardsPoint::encode_to_curve::<sha2::Sha512>(&[&input], &[dst]);
+            assert_eq!(computed, expected_output, "Failed in test {}", index);
+        }
+    }
+
+    // Hash-to-curve test vectors from
+    // https://www.rfc-editor.org/rfc/rfc9380.html#appendix-J.5.1
+    // These are of the form (input_msg, output_x, output_y)
+    #[cfg(all(feature = "alloc", feature = "digest"))]
+    const RFC_HASH_TO_CURVE_KAT: &[(&[u8], &str, &str)] = &[
+        (
+            b"",
+            "3c3da6925a3c3c268448dcabb47ccde5439559d9599646a8260e47b1e4822fc6",
+            "09a6c8561a0b22bef63124c588ce4c62ea83a3c899763af26d795302e115dc21",
+        ),
+
+        (
+            b"abc",
+            "608040b42285cc0d72cbb3985c6b04c935370c7361f4b7fbdb1ae7f8c1a8ecad",
+            "1a8395b88338f22e435bbd301183e7f20a5f9de643f11882fb237f88268a5531",
+        ),
+
+        (
+            b"abcdef0123456789",
+            "6d7fabf47a2dc03fe7d47f7dddd21082c5fb8f86743cd020f3fb147d57161472",
+            "53060a3d140e7fbcda641ed3cf42c88a75411e648a1add71217f70ea8ec561a6",
+        ),
+        (
+            b"q128_qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\
+            qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+            "5fb0b92acedd16f3bcb0ef83f5c7b7a9466b5f1e0d8d217421878ea3686f8524",
+            "2eca15e355fcfa39d2982f67ddb0eea138e2994f5956ed37b7f72eea5e89d2f7",
+        ),
+        (
+            b"a512_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
+            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
+            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
+            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
+            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
+            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "0efcfde5898a839b00997fbe40d2ebe950bc81181afbd5cd6b9618aa336c1e8c",
+            "6dc2fc04f266c5c27f236a80b14f92ccd051ef1ff027f26a07f8c0f327d8f995"
+        )
+    ];
+
     #[test]
     #[cfg(all(feature = "alloc", feature = "digest"))]
     fn elligator_hash_to_curve_test_vectors() {
-        let dst = b"QUUX-V01-CS02-with-edwards25519_XMD:SHA-512_ELL2_NU_";
+        let dst = b"QUUX-V01-CS02-with-edwards25519_XMD:SHA-512_ELL2_RO_";
         for (index, vector) in RFC_HASH_TO_CURVE_KAT.iter().enumerate() {
             let input = vector.0;
 
             let expected_output = {
-                let mut x_bytes = hex::decode(vector.1).unwrap();
-                x_bytes.reverse();
-                let x = FieldElement::from_bytes(&x_bytes.try_into().unwrap());
+                let x = hex_str_to_fe(vector.1);
+                let y = hex_str_to_fe(vector.2);
 
-                let mut y_bytes = hex::decode(vector.2).unwrap();
-                y_bytes.reverse();
-                let y = FieldElement::from_bytes(&y_bytes.try_into().unwrap());
-
-                EdwardsPoint {
-                    X: x,
-                    Y: y,
-                    Z: FieldElement::ONE,
-                    T: &x * &y,
-                }
+                AffinePoint { x, y }.to_edwards()
             };
 
-            let computed = EdwardsPoint::hash_to_curve::<sha2::Sha512>(&[input], &[dst]);
-            assert_eq!(computed, expected_output, "Failed in test {index}");
+            let computed = EdwardsPoint::hash_to_curve::<sha2::Sha512>(&[&input], &[dst]);
+
+            assert_eq!(expected_output, computed, "Failed in test {}", index);
         }
     }
 }

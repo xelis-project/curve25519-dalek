@@ -3,8 +3,7 @@ name = "curve25519-dalek"
 # Before incrementing:
 # - update CHANGELOG
 # - update README if required by semver
-# - if README was updated, also update module documentation in src/lib.rs
-version = "5.0.0-pre.0"
+version = "5.0.0-pre.4"
 edition = "2024"
 rust-version = "1.85.0"
 authors = [
@@ -28,22 +27,15 @@ rustdoc-args = [
     "--cfg",
     "docsrs",
 ]
-features = [
-    "serde",
-    "rand_core",
-    "digest",
-    "legacy_compatibility",
-    "group-bits",
-    "ecdlp",
-]
+all-features = true
 
 [dev-dependencies]
-sha2 = { version = "0.11.0-rc.0", default-features = false }
+sha2 = { version = "0.11.0-rc.3", default-features = false }
 bincode = "1"
 criterion = { version = "0.5", features = ["html_reports"] }
 hex = "0.4.2"
-rand = "0.9"
-rand_core = { version = "0.9", default-features = false, features = ["os_rng"] }
+proptest = "1"
+rand = "0.10.0-rc.5"
 
 [build-dependencies]
 rustc_version = "0.4.0"
@@ -60,10 +52,10 @@ required-features = ["alloc", "rand_core", "std", "ecdlp"]
 
 [dependencies]
 cfg-if = "1"
-ff = { version = "=0.14.0-pre.0", default-features = false, optional = true }
-group = { version = "=0.14.0-pre.0", default-features = false, optional = true }
-rand_core = { version = "0.9", default-features = false, optional = true }
-digest = { version = "0.11.0-rc.0", default-features = false, optional = true, features = [
+ff = { version = "=0.14.0-pre.0", package = "rustcrypto-ff", default-features = false, optional = true }
+group = { version = "=0.14.0-pre.0", package = "rustcrypto-group", default-features = false, optional = true }
+rand_core = { version = "0.10.0-rc-3", default-features = false, optional = true }
+digest = { version = "0.11.0-rc.4", default-features = false, optional = true, features = [
     "block-api",
 ] }
 subtle = { version = "2.6.0", default-features = false, features = [
@@ -91,9 +83,10 @@ group = ["dep:group", "rand_core"]
 group-bits = ["group", "ff/bits"]
 ecdlp = ["alloc", "std", "dep:bytemuck"]
 digest = ["dep:digest"]
+lizard = ["digest"]
 
 [target.'cfg(all(not(curve25519_dalek_backend = "fiat"), not(curve25519_dalek_backend = "serial"), target_arch = "x86_64"))'.dependencies]
-curve25519-dalek-derive = { version = "0.1", path = "../curve25519-dalek-derive" }
+curve25519-dalek-derive = "0.1"
 
 [lints.rust.unexpected_cfgs]
 level = "warn"

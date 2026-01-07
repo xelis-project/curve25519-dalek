@@ -14,7 +14,7 @@ use core::fmt::Debug;
 #[cfg(feature = "pkcs8")]
 use ed25519::pkcs8;
 
-#[cfg(any(test, feature = "rand_core"))]
+#[cfg(feature = "rand_core")]
 use rand_core::CryptoRng;
 
 #[cfg(feature = "serde")]
@@ -29,10 +29,12 @@ use curve25519_dalek::{
     scalar::Scalar,
 };
 
-use ed25519::signature::{KeypairRef, Signer, Verifier};
+use ed25519::signature::{KeypairRef, MultipartSigner, MultipartVerifier, Signer, Verifier};
 
 #[cfg(feature = "digest")]
 use crate::context::Context;
+#[cfg(feature = "digest")]
+use curve25519_dalek::digest::Update;
 #[cfg(feature = "digest")]
 use signature::DigestSigner;
 
@@ -187,19 +189,19 @@ impl SigningKey {
     #[cfg_attr(feature = "rand_core", doc = "```")]
     #[cfg_attr(not(feature = "rand_core"), doc = "```ignore")]
     /// # fn main() {
-    /// use rand::rngs::OsRng;
+    /// use rand::rngs::SysRng;
     /// use rand_core::TryRngCore;
     /// use ed25519_dalek::{Signature, SigningKey};
     ///
-    /// let mut csprng = OsRng.unwrap_err();
+    /// let mut csprng = SysRng.unwrap_err();
     /// let signing_key: SigningKey = SigningKey::generate(&mut csprng);
     /// # }
     /// ```
     ///
     /// # Input
     ///
-    /// A CSPRNG with a `fill_bytes()` method, e.g. `rand_os::OsRng`.
-    #[cfg(any(test, feature = "rand_core"))]
+    /// A CSPRNG with a `fill_bytes()` method, e.g. `rand_os::SysRng`.
+    #[cfg(feature = "rand_core")]
     pub fn generate<R: CryptoRng + ?Sized>(csprng: &mut R) -> SigningKey {
         let mut secret = SecretKey::default();
         csprng.fill_bytes(&mut secret);
@@ -240,11 +242,11 @@ impl SigningKey {
     /// use ed25519_dalek::SigningKey;
     /// use ed25519_dalek::Signature;
     /// use sha2::Sha512;
-    /// use rand::rngs::OsRng;
+    /// use rand::rngs::SysRng;
     /// use rand_core::TryRngCore;
     ///
     /// # fn main() {
-    /// let mut csprng = OsRng.unwrap_err();
+    /// let mut csprng = SysRng.unwrap_err();
     /// let signing_key: SigningKey = SigningKey::generate(&mut csprng);
     /// let message: &[u8] = b"All I want is to pet all of the dogs.";
     ///
@@ -286,11 +288,11 @@ impl SigningKey {
     /// # use ed25519_dalek::Signature;
     /// # use ed25519_dalek::SignatureError;
     /// # use sha2::Sha512;
-    /// # use rand::rngs::OsRng;
+    /// # use rand::rngs::SysRng;
     /// # use rand_core::TryRngCore;
     /// #
     /// # fn do_test() -> Result<Signature, SignatureError> {
-    /// # let mut csprng = OsRng.unwrap_err();
+    /// # let mut csprng = SysRng.unwrap_err();
     /// # let signing_key: SigningKey = SigningKey::generate(&mut csprng);
     /// # let message: &[u8] = b"All I want is to pet all of the dogs.";
     /// # let mut prehashed: Sha512 = Sha512::new();
@@ -366,11 +368,11 @@ impl SigningKey {
     /// use ed25519_dalek::Signature;
     /// use ed25519_dalek::SignatureError;
     /// use sha2::Sha512;
-    /// use rand::rngs::OsRng;
+    /// use rand::rngs::SysRng;
     /// use rand_core::TryRngCore;
     ///
     /// # fn do_test() -> Result<(), SignatureError> {
-    /// let mut csprng = OsRng.unwrap_err();
+    /// let mut csprng = SysRng.unwrap_err();
     /// let signing_key: SigningKey = SigningKey::generate(&mut csprng);
     /// let message: &[u8] = b"All I want is to pet all of the dogs.";
     ///
@@ -568,6 +570,12 @@ impl KeypairRef for SigningKey {
 impl Signer<Signature> for SigningKey {
     /// Sign a message with this signing key's secret key.
     fn try_sign(&self, message: &[u8]) -> Result<Signature, SignatureError> {
+        self.try_multipart_sign(&[message])
+    }
+}
+
+impl MultipartSigner<Signature> for SigningKey {
+    fn try_multipart_sign(&self, message: &[&[u8]]) -> Result<Signature, SignatureError> {
         let expanded: ExpandedSecretKey = (&self.secret_key).into();
         Ok(expanded.raw_sign::<Sha512>(message, &self.verifying_key))
     }
@@ -583,10 +591,15 @@ impl Signer<Signature> for SigningKey {
 #[cfg(feature = "digest")]
 impl<D> DigestSigner<D, Signature> for SigningKey
 where
-    D: Digest<OutputSize = U64>,
+    D: Digest<OutputSize = U64> + Update,
 {
-    fn try_sign_digest(&self, msg_digest: D) -> Result<Signature, SignatureError> {
-        self.sign_prehashed(msg_digest, None)
+    fn try_sign_digest<F: Fn(&mut D) -> Result<(), SignatureError>>(
+        &self,
+        f: F,
+    ) -> Result<Signature, SignatureError> {
+        let mut digest = D::new();
+        f(&mut digest)?;
+        self.sign_prehashed(digest, None)
     }
 }
 
@@ -601,10 +614,15 @@ where
 #[cfg(feature = "digest")]
 impl<D> DigestSigner<D, Signature> for Context<'_, '_, SigningKey>
 where
-    D: Digest<OutputSize = U64>,
+    D: Digest<OutputSize = U64> + Update,
 {
-    fn try_sign_digest(&self, msg_digest: D) -> Result<Signature, SignatureError> {
-        self.key().sign_prehashed(msg_digest, Some(self.value()))
+    fn try_sign_digest<F: Fn(&mut D) -> Result<(), SignatureError>>(
+        &self,
+        f: F,
+    ) -> Result<Signature, SignatureError> {
+        let mut digest = D::new();
+        f(&mut digest)?;
+        self.key().sign_prehashed(digest, Some(self.value()))
     }
 }
 
@@ -612,6 +630,16 @@ impl Verifier<Signature> for SigningKey {
     /// Verify a signature on a message with this signing key's public key.
     fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), SignatureError> {
         self.verifying_key.verify(message, signature)
+    }
+}
+
+impl MultipartVerifier<Signature> for SigningKey {
+    fn multipart_verify(
+        &self,
+        message: &[&[u8]],
+        signature: &Signature,
+    ) -> Result<(), SignatureError> {
+        self.verifying_key.multipart_verify(message, signature)
     }
 }
 
@@ -829,7 +857,7 @@ impl ExpandedSecretKey {
     #[inline(always)]
     pub(crate) fn raw_sign<CtxDigest>(
         &self,
-        message: &[u8],
+        message: &[&[u8]],
         verifying_key: &VerifyingKey,
     ) -> Signature
     where
@@ -838,7 +866,7 @@ impl ExpandedSecretKey {
         // OK unwrap, update can't fail.
         self.raw_sign_byupdate(
             |h: &mut CtxDigest| {
-                h.update(message);
+                message.iter().for_each(|slice| h.update(slice));
                 Ok(())
             },
             verifying_key,

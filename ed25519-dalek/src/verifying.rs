@@ -19,7 +19,7 @@ use curve25519_dalek::{
     scalar::Scalar,
 };
 
-use ed25519::signature::Verifier;
+use ed25519::signature::{MultipartVerifier, Verifier};
 
 use sha2::Sha512;
 
@@ -31,6 +31,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[cfg(feature = "digest")]
 use crate::context::Context;
+#[cfg(feature = "digest")]
+use curve25519_dalek::digest::Update;
 #[cfg(feature = "digest")]
 use signature::DigestVerifier;
 
@@ -200,7 +202,7 @@ impl VerifyingKey {
     #[allow(non_snake_case)]
     pub(crate) fn raw_verify<CtxDigest>(
         &self,
-        message: &[u8],
+        message: &[&[u8]],
         signature: &ed25519::Signature,
     ) -> Result<(), SignatureError>
     where
@@ -245,7 +247,7 @@ impl VerifyingKey {
 
         let message = prehashed_message.finalize();
 
-        let expected_R = RCompute::<CtxDigest>::compute(self, signature, Some(ctx), &message);
+        let expected_R = RCompute::<CtxDigest>::compute(self, signature, Some(ctx), &[&message]);
 
         if expected_R == signature.R {
             Ok(())
@@ -371,7 +373,7 @@ impl VerifyingKey {
             return Err(InternalError::Verify.into());
         }
 
-        let expected_R = RCompute::<Sha512>::compute(self, signature, None, message);
+        let expected_R = RCompute::<Sha512>::compute(self, signature, None, &[message]);
         if expected_R == signature.R {
             Ok(())
         } else {
@@ -447,7 +449,7 @@ impl VerifyingKey {
         }
 
         let message = prehashed_message.finalize();
-        let expected_R = RCompute::<Sha512>::compute(self, signature, Some(ctx), &message);
+        let expected_R = RCompute::<Sha512>::compute(self, signature, Some(ctx), &[&message]);
 
         if expected_R == signature.R {
             Ok(())
@@ -508,10 +510,10 @@ where
         key: &VerifyingKey,
         signature: InternalSignature,
         prehash_ctx: Option<&[u8]>,
-        message: &[u8],
+        message: &[&[u8]],
     ) -> CompressedEdwardsY {
         let mut c = Self::new(key, signature, prehash_ctx);
-        c.update(message);
+        message.iter().for_each(|slice| c.update(slice));
         c.finish()
     }
 
@@ -561,6 +563,16 @@ impl Verifier<ed25519::Signature> for VerifyingKey {
     ///
     /// Returns `Ok(())` if the signature is valid, and `Err` otherwise.
     fn verify(&self, message: &[u8], signature: &ed25519::Signature) -> Result<(), SignatureError> {
+        self.multipart_verify(&[message], signature)
+    }
+}
+
+impl MultipartVerifier<ed25519::Signature> for VerifyingKey {
+    fn multipart_verify(
+        &self,
+        message: &[&[u8]],
+        signature: &ed25519::Signature,
+    ) -> Result<(), SignatureError> {
         self.raw_verify::<Sha512>(message, signature)
     }
 }
@@ -569,14 +581,16 @@ impl Verifier<ed25519::Signature> for VerifyingKey {
 #[cfg(feature = "digest")]
 impl<MsgDigest> DigestVerifier<MsgDigest, ed25519::Signature> for VerifyingKey
 where
-    MsgDigest: Digest<OutputSize = U64>,
+    MsgDigest: Digest<OutputSize = U64> + Update,
 {
-    fn verify_digest(
+    fn verify_digest<F: Fn(&mut MsgDigest) -> Result<(), SignatureError>>(
         &self,
-        msg_digest: MsgDigest,
+        f: F,
         signature: &ed25519::Signature,
     ) -> Result<(), SignatureError> {
-        self.verify_prehashed(msg_digest, None, signature)
+        let mut digest = MsgDigest::new();
+        f(&mut digest)?;
+        self.verify_prehashed(digest, None, signature)
     }
 }
 
@@ -585,15 +599,17 @@ where
 #[cfg(feature = "digest")]
 impl<MsgDigest> DigestVerifier<MsgDigest, ed25519::Signature> for Context<'_, '_, VerifyingKey>
 where
-    MsgDigest: Digest<OutputSize = U64>,
+    MsgDigest: Digest<OutputSize = U64> + Update,
 {
-    fn verify_digest(
+    fn verify_digest<F: Fn(&mut MsgDigest) -> Result<(), SignatureError>>(
         &self,
-        msg_digest: MsgDigest,
+        f: F,
         signature: &ed25519::Signature,
     ) -> Result<(), SignatureError> {
+        let mut digest = MsgDigest::new();
+        f(&mut digest)?;
         self.key()
-            .verify_prehashed(msg_digest, Some(self.value()), signature)
+            .verify_prehashed(digest, Some(self.value()), signature)
     }
 }
 
