@@ -521,126 +521,178 @@ pub fn decode<R: ProgressReportFunction>(
 }
 
 /// Decode a [`RistrettoPoint`] to the represented integer, in parallel.
-/// This implementation uses [`rayon`] for parallelism, which depends on the Rust standard library (`std`),
-/// and therefore is not compatible with `#![no_std]` environments such as WebAssembly (`wasm32-unknown-unknown`) or bare-metal targets.
 ///
-/// Rayon provides efficient thread pool management and typically outperforms manual thread spawning using [`std::thread`].
-/// 
-/// Note: If you need compatibility with non-`std` targets, use the single-threaded [`decode`] function instead.
-/// This may take a long time, so if you are running on an event-loop such as `tokio`, you
-/// should wrap this in a `tokio::block_on` task.
+/// This implementation uses **manual parallelism via [`std::thread::scope`]** with
+/// a fixed number of worker threads and *static work partitioning*.
+/// Each worker processes disjoint chunks of the search space and cooperatively
+/// terminates early using a shared atomic flag once a solution is found.
+///
+/// ### Platform support
+/// This function depends on the Rust standard library (`std`) and is therefore
+/// **not compatible with `#![no_std]` targets**, including WebAssembly
+/// (`wasm32-unknown-unknown`) and bare-metal environments.
+///
+/// ### Cancellation semantics
+/// Early termination is **cooperative**:
+/// once a result is found, other threads observe a shared atomic flag and
+/// exit at the next cancellation check. Threads are not forcibly interrupted,
+/// so up to one in-flight chunk per worker may still complete.
+///
+/// ### Performance notes
+/// Work is assigned statically to minimize synchronization and preserve cache
+/// locality and SIMD efficiency.
+///
+/// ### Async runtimes
+/// This function is **CPU-bound and blocking**. When called from an async runtime
+/// (such as `tokio`), it should be executed inside a dedicated blocking task
+/// (e.g. `tokio::task::spawn_blocking`) to avoid stalling the executor.
+///
+/// ### Alternatives
+/// * For single-threaded execution or `no_std` compatibility, use [`decode`].
 pub fn par_decode<R: ProgressReportFunction + Sync>(
     precomputed_tables: &ECDLPTablesFileView<'_>,
     point: RistrettoPoint,
     args: ECDLPArguments<R>,
 ) -> Option<i64> {
-    // if args.n_threads == 1 {
-    //     return decode(precomputed_tables, point, args);
-    // }
+    use std::ops::ControlFlow;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
 
-    use rayon::prelude::*;
-    use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
+    let n_threads = args.n_threads.max(1);
 
-    let chunk_size: u64 = 64 * 320_000_000_000_0 / ((30 - precomputed_tables.get_l1()).max(0) * 2).max(1) as u64;
+    let chunk_size: u64 = 64 * 320_000_000_000_0
+        / ((30 - precomputed_tables.get_l1()).max(0) * 2).max(1) as u64;
+
     let total_range = args.range_end as u64 - args.range_start as u64;
     let num_chunks = ((total_range + chunk_size - 1) / chunk_size) as usize;
-    let n_threads = args.n_threads;
 
     let end_flag = Arc::new(AtomicBool::new(false));
 
+    // Precompute shared caches once (read-only afterwards)
     let mut t2_cache = [AffineMontgomeryPoint::identity(); BATCH_SIZE];
     let mut t2_cache_alpha = [FieldElement::ZERO; BATCH_SIZE];
     {
         let t2_table = precomputed_tables.get_t2();
-        for (i, (cache, alpha)) in t2_cache.iter_mut().zip(t2_cache_alpha.iter_mut()).enumerate() {
-            let point = t2_table.index(i);
-            *alpha = &MONTGOMERY_A_NEG - &point.u;
-            *cache = point;
+        for (i, (cache, alpha)) in t2_cache
+            .iter_mut()
+            .zip(t2_cache_alpha.iter_mut())
+            .enumerate()
+        {
+            let p = t2_table.index(i);
+            *alpha = &MONTGOMERY_A_NEG - &p.u;
+            *cache = p;
         }
     }
 
-    (0..n_threads)
-        .into_par_iter()
-        .find_map_any(|thread_index| {
-            let t2_u_values: [FieldElement; BATCH_SIZE] = {
-                let mut u_values = [FieldElement::ZERO; BATCH_SIZE];
-                for i in 0..BATCH_SIZE {
-                    u_values[i] = t2_cache[i].u;
-                }
-                u_values
-            };
+    std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(n_threads);
 
-            let t2_vs: [FieldElement; BATCH_SIZE] = t2_cache.map(|p| p.v.clone());
-            let t2_vs_neg: [FieldElement; BATCH_SIZE] = t2_cache.map(|p| -&p.v);
+        for thread_index in 0..n_threads {
+            let end_flag = Arc::clone(&end_flag);
 
-            // allocate scratch data buffers once per worker
-            let mut batch = &mut [FieldElement::ZERO; BATCH_SIZE];
-            let mut alphas = &mut [FieldElement::ZERO; BATCH_SIZE];
-            let mut qxs = &mut [FieldElement::ZERO; BATCH_SIZE];
-            let mut neg_qxs = &mut [FieldElement::ZERO; BATCH_SIZE];
+            // Borrow shared inputs within the scope
+            let precomputed_tables = precomputed_tables;
+            let args = &args;
+            let t2_cache = &t2_cache;
+            let t2_cache_alpha = &t2_cache_alpha;
 
-            for chunk_index in (thread_index..num_chunks).step_by(n_threads) {
-                if end_flag.load(Ordering::Relaxed) {
-                    return None;
-                }
+            let point = point;
 
-                let start = args.range_start + (chunk_index as u64 * chunk_size) as i64;
-                let end = ((chunk_index as u64 + 1) * chunk_size).min(args.range_end as u64) as i64;
-
-                let chunk_args = ECDLPArguments {
-                    range_start: start,
-                    range_end: end,
-                    n_threads: 1,
-                    pseudo_constant_time: args.pseudo_constant_time,
-                    progress_report_function: NoopReportFn, // FIXME: make chunk-relative on the global scale
-                };
-
-                let (offset, normalized, num_batches) =
-                    decode_prep(precomputed_tables, point, &chunk_args, 1, 0);
-
-                let progress_wrapper = |progress: f64| {
-                    if !chunk_args.pseudo_constant_time && end_flag.load(Ordering::Relaxed) {
-                        ControlFlow::Break(())
-                    } else {
-                        let result = args.progress_report_function.report(progress);
-                        if result.is_break() {
-                            end_flag.store(true, Ordering::SeqCst);
-                        }
-                        result
+            handles.push(scope.spawn(move || -> Option<i64> {
+                // Per-thread derived constants
+                let t2_u_values: [FieldElement; BATCH_SIZE] = {
+                    let mut u_values = [FieldElement::ZERO; BATCH_SIZE];
+                    for i in 0..BATCH_SIZE {
+                        u_values[i] = t2_cache[i].u;
                     }
+                    u_values
                 };
+                let t2_vs: [FieldElement; BATCH_SIZE] = t2_cache.map(|p| p.v.clone());
+                let t2_vs_neg: [FieldElement; BATCH_SIZE] = t2_cache.map(|p| -&p.v);
 
-                let point_iter =
-                    make_point_iterator_simd(precomputed_tables, normalized, num_batches);
+                // Per-thread scratch (allocated once)
+                let mut batch = [FieldElement::ZERO; BATCH_SIZE];
+                let mut alphas = [FieldElement::ZERO; BATCH_SIZE];
+                let mut qxs = [FieldElement::ZERO; BATCH_SIZE];
+                let mut neg_qxs = [FieldElement::ZERO; BATCH_SIZE];
 
-                // if thread_index == 0 && (start / 100000000000000_i64) % n_threads as i64 == 0 {
-                //     println!("Thread 0: processing chunk starting at {}", start);
-                // }
+                // Static chunk scheduling: i, i+n_threads, ...
+                for chunk_index in (thread_index..num_chunks).step_by(n_threads) {
+                    if end_flag.load(Ordering::Relaxed) {
+                        return None;
+                    }
 
-                if let Some(res) = fast_ecdlp_simd(
-                    precomputed_tables,
-                    normalized,
-                    point_iter,
-                    chunk_args.pseudo_constant_time,
-                    &end_flag,
-                    progress_wrapper,
-                    &t2_cache,
-                    &t2_cache_alpha,
-                    &t2_u_values,
-                    &t2_vs,
-                    &t2_vs_neg,
-                    &mut batch,
-                    &mut alphas,
-                    &mut qxs,
-                    &mut neg_qxs
-                ) {
+                    let start = args.range_start + (chunk_index as u64 * chunk_size) as i64;
+                    let end = ((chunk_index as u64 + 1) * chunk_size)
+                        .min(args.range_end as u64) as i64;
+
+                    let chunk_args = ECDLPArguments {
+                        range_start: start,
+                        range_end: end,
+                        n_threads: 1,
+                        pseudo_constant_time: args.pseudo_constant_time,
+                        progress_report_function: NoopReportFn, // TODO: global-scale progress
+                    };
+
+                    let (offset, normalized, num_batches) =
+                        decode_prep(precomputed_tables, point, &chunk_args, 1, 0);
+
+                    let progress_wrapper = |progress: f64| {
+                        if !chunk_args.pseudo_constant_time && end_flag.load(Ordering::Relaxed) {
+                            ControlFlow::Break(())
+                        } else {
+                            let result = args.progress_report_function.report(progress);
+                            if result.is_break() {
+                                end_flag.store(true, Ordering::SeqCst);
+                            }
+                            result
+                        }
+                    };
+
+                    let point_iter =
+                        make_point_iterator_simd(precomputed_tables, normalized, num_batches);
+
+                    if let Some(res) = fast_ecdlp_simd(
+                        precomputed_tables,
+                        normalized,
+                        point_iter,
+                        chunk_args.pseudo_constant_time,
+                        &end_flag,
+                        progress_wrapper,
+                        t2_cache,
+                        t2_cache_alpha,
+                        &t2_u_values,
+                        &t2_vs,
+                        &t2_vs_neg,
+                        &mut batch,
+                        &mut alphas,
+                        &mut qxs,
+                        &mut neg_qxs,
+                    ) {
+                        end_flag.store(true, Ordering::SeqCst);
+                        return Some(offset + res as i64);
+                    }
+                }
+
+                None
+            }));
+        }
+
+        // Join all threads; return first success
+        let mut found: Option<i64> = None;
+        for h in handles {
+            match h.join() {
+                Ok(res) if found.is_none() && res.is_some() => found = res,
+                Ok(_) => {}
+                Err(_) => {
                     end_flag.store(true, Ordering::SeqCst);
-                    return Some(offset + res as i64);
                 }
             }
-
-            None
-        })
+        }
+        found
+    })
 }
 
 fn make_point_iterator_simd_batched(
@@ -727,100 +779,131 @@ pub fn par_decode_scalar<R: ProgressReportFunction + Sync>(
     point: RistrettoPoint,
     args: ECDLPArguments<R>,
 ) -> Option<i64> {
-    // if args.n_threads == 1 {
-    //     return decode(precomputed_tables, point, args);
-    // }
+    use std::ops::ControlFlow;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
 
-    use rayon::prelude::*;
-    use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
+    let n_threads = args.n_threads.max(1);
 
-    let chunk_size: u64 = 320_000_000_000_0 / ((30 - precomputed_tables.get_l1()).max(0) * 2).max(1) as u64;
+    let chunk_size: u64 = 320_000_000_000_0
+        / ((30 - precomputed_tables.get_l1()).max(0) * 2).max(1) as u64;
+
     let total_range = args.range_end as u64 - args.range_start as u64;
     let num_chunks = ((total_range + chunk_size - 1) / chunk_size) as usize;
-    let n_threads = args.n_threads;
 
     let end_flag = Arc::new(AtomicBool::new(false));
 
+    // Precompute shared caches once (read-only afterwards)
     let mut t2_cache = [AffineMontgomeryPoint::identity(); BATCH_SIZE];
     let mut t2_cache_alpha = [FieldElement::ZERO; BATCH_SIZE];
     {
         let t2_table = precomputed_tables.get_t2();
-        for (i, (cache, alpha)) in t2_cache.iter_mut().zip(t2_cache_alpha.iter_mut()).enumerate() {
-            let point = t2_table.index(i);
-            *alpha = &MONTGOMERY_A_NEG - &point.u;
-            *cache = point;
+        for (i, (cache, alpha)) in t2_cache
+            .iter_mut()
+            .zip(t2_cache_alpha.iter_mut())
+            .enumerate()
+        {
+            let p = t2_table.index(i);
+            *alpha = &MONTGOMERY_A_NEG - &p.u;
+            *cache = p;
         }
     }
 
-    (0..n_threads)
-        .into_par_iter()
-        .find_map_any(|thread_index| {
-            let t2_u_values: [FieldElement; BATCH_SIZE] = {
-                let mut u_values = [FieldElement::ZERO; BATCH_SIZE];
-                for i in 0..BATCH_SIZE {
-                    u_values[i] = t2_cache[i].u;
-                }
-                u_values
-            };
+    std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(n_threads);
 
-            let t2_vs: [FieldElement; BATCH_SIZE] = t2_cache.map(|p| p.v.clone());
-            let t2_vs_neg: [FieldElement; BATCH_SIZE] = t2_cache.map(|p| -&p.v);
+        for thread_index in 0..n_threads {
+            let end_flag = Arc::clone(&end_flag);
 
-            for chunk_index in (thread_index..num_chunks).step_by(n_threads) {
-                if end_flag.load(Ordering::Relaxed) {
-                    return None;
-                }
+            // Borrow shared inputs within the scope
+            let precomputed_tables = precomputed_tables;
+            let args = &args;
+            let t2_cache = &t2_cache;
+            let t2_cache_alpha = &t2_cache_alpha;
 
-                let start = args.range_start + (chunk_index as u64 * chunk_size) as i64;
-                let end = ((chunk_index as u64 + 1) * chunk_size).min(args.range_end as u64) as i64;
+            // NOTE: if `RistrettoPoint` isn’t `Copy`, use `let point = point.clone();`
+            let point = point;
 
-                let chunk_args = ECDLPArguments {
-                    range_start: start,
-                    range_end: end,
-                    n_threads: 1,
-                    pseudo_constant_time: args.pseudo_constant_time,
-                    progress_report_function: NoopReportFn, // FIXME: make chunk-relative on the global scale
-                };
-
-                let (offset, normalized, num_batches) =
-                    decode_prep(precomputed_tables, point, &chunk_args, 1, 0);
-
-                let progress_wrapper = |progress: f64| {
-                    if !chunk_args.pseudo_constant_time && end_flag.load(Ordering::Relaxed) {
-                        ControlFlow::Break(())
-                    } else {
-                        let result = args.progress_report_function.report(progress);
-                        if result.is_break() {
-                            end_flag.store(true, Ordering::SeqCst);
-                        }
-                        result
+            handles.push(scope.spawn(move || -> Option<i64> {
+                // Per-thread derived values
+                let t2_u_values: [FieldElement; BATCH_SIZE] = {
+                    let mut u_values = [FieldElement::ZERO; BATCH_SIZE];
+                    for i in 0..BATCH_SIZE {
+                        u_values[i] = t2_cache[i].u;
                     }
+                    u_values
                 };
+                let _t2_vs: [FieldElement; BATCH_SIZE] = t2_cache.map(|p| p.v.clone());
+                let _t2_vs_neg: [FieldElement; BATCH_SIZE] = t2_cache.map(|p| -&p.v);
 
-                let point_iter =
-                    make_point_iterator(precomputed_tables, normalized, num_batches);
+                for chunk_index in (thread_index..num_chunks).step_by(n_threads) {
+                    if end_flag.load(Ordering::Relaxed) {
+                        return None;
+                    }
 
-                // if thread_index == 0 && (start / 100000000000000_i64) % n_threads as i64 == 0 {
-                //     println!("Thread 0: processing chunk starting at {}", start);
-                // }
+                    let start = args.range_start + (chunk_index as u64 * chunk_size) as i64;
+                    let end = ((chunk_index as u64 + 1) * chunk_size)
+                        .min(args.range_end as u64) as i64;
 
-                if let Some(res) = fast_ecdlp(
-                    precomputed_tables,
-                    normalized,
-                    point_iter,
-                    chunk_args.pseudo_constant_time,
-                    &end_flag,
-                    progress_wrapper,
-                    &t2_cache,
-                    &t2_cache_alpha,
-                ) {
+                    let chunk_args = ECDLPArguments {
+                        range_start: start,
+                        range_end: end,
+                        n_threads: 1,
+                        pseudo_constant_time: args.pseudo_constant_time,
+                        progress_report_function: NoopReportFn, // TODO: global-scale progress
+                    };
+
+                    let (offset, normalized, num_batches) =
+                        decode_prep(precomputed_tables, point, &chunk_args, 1, 0);
+
+                    let progress_wrapper = |progress: f64| {
+                        if !chunk_args.pseudo_constant_time && end_flag.load(Ordering::Relaxed) {
+                            ControlFlow::Break(())
+                        } else {
+                            let result = args.progress_report_function.report(progress);
+                            if result.is_break() {
+                                end_flag.store(true, Ordering::SeqCst);
+                            }
+                            result
+                        }
+                    };
+
+                    let point_iter = make_point_iterator(precomputed_tables, normalized, num_batches);
+
+                    if let Some(res) = fast_ecdlp(
+                        precomputed_tables,
+                        normalized,
+                        point_iter,
+                        chunk_args.pseudo_constant_time,
+                        &end_flag,
+                        progress_wrapper,
+                        t2_cache,
+                        t2_cache_alpha,
+                    ) {
+                        end_flag.store(true, Ordering::SeqCst);
+                        return Some(offset + res as i64);
+                    }
+                }
+
+                None
+            }));
+        }
+
+        // Join all threads; return first success
+        let mut found: Option<i64> = None;
+        for h in handles {
+            match h.join() {
+                Ok(res) if found.is_none() && res.is_some() => found = res,
+                Ok(_) => {}
+                Err(_) => {
                     end_flag.store(true, Ordering::SeqCst);
-                    return Some(offset + res as i64);
                 }
             }
-
-            None
-        })
+        }
+        found
+    })
 }
 
 
