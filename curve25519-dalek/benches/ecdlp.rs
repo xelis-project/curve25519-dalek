@@ -5,11 +5,15 @@ use curve25519_dalek::{
     Scalar,
 };
 use rand::Rng;
-use std::{path::Path, time::Duration};
+use std::{path::Path, time::Duration, thread};
 
 pub fn ecdlp_bench(c: &mut Criterion) {
+    let avail = thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+
     if !Path::new("ecdlp_table.bin").exists() {
-        let tables = ECDLPTables::generate_par(26, 16).unwrap();
+        let tables = ECDLPTables::generate_par(26, avail).unwrap();
         tables.write_to_file("ecdlp_table.bin").unwrap();
     }
 
@@ -18,147 +22,37 @@ pub fn ecdlp_bench(c: &mut Criterion) {
 
     const TEST_VAL: u64 = 1u64 << 46;
 
-    c.bench_function("par fast ecdlp T=1", |b| {
-        let num: u64 = TEST_VAL;
-        let point = Scalar::from(num) * G;
-        b.iter(|| {
-            let res = ecdlp::par_decode(
-                &view,
-                black_box(point),
-                ECDLPArguments::new_with_range(0, 1 << 63)
-                    .n_threads(1),
-            );
-            assert_eq!(res, Some(num as i64));
+    for &t in &[1usize, 2, 4, 8, 16] {
+        if t > avail {
+            continue;
+        }
+
+        c.bench_function(&format!("par fast ecdlp T={t}"), |b| {
+            let num: u64 = TEST_VAL;
+            let point = Scalar::from(num) * G;
+            b.iter(|| {
+                let res = ecdlp::par_decode(
+                    &view,
+                    black_box(point),
+                    ECDLPArguments::new_with_range(0, 1 << 63).n_threads(t),
+                );
+                assert_eq!(res, Some(num as i64));
+            });
         });
-    });
 
-
-    c.bench_function("par fast ecdlp T=1 scalar", |b| {
-        let num: u64 = TEST_VAL;
-        let point = Scalar::from(num) * G;
-        b.iter(|| {
-            let res = ecdlp::par_decode_scalar(
-                &view,
-                black_box(point),
-                ECDLPArguments::new_with_range(0, 1 << 63)
-                    .n_threads(1),
-            );
-            assert_eq!(res, Some(num as i64));
+        c.bench_function(&format!("par fast ecdlp T={t} scalar"), |b| {
+            let num: u64 = TEST_VAL;
+            let point = Scalar::from(num) * G;
+            b.iter(|| {
+                let res = ecdlp::par_decode_scalar(
+                    &view,
+                    black_box(point),
+                    ECDLPArguments::new_with_range(0, 1 << 63).n_threads(t),
+                );
+                assert_eq!(res, Some(num as i64));
+            });
         });
-    });
-
-    c.bench_function("par fast ecdlp T=2", |b| {
-        let num: u64 = TEST_VAL;
-        let point = Scalar::from(num) * G;
-        b.iter(|| {
-            let res = ecdlp::par_decode(
-                &view,
-                black_box(point),
-                ECDLPArguments::new_with_range(0, 1 << 63)
-                    .n_threads(2),
-            );
-            assert_eq!(res, Some(num as i64));
-        });
-    });
-
-
-    c.bench_function("par fast ecdlp T=2 scalar", |b| {
-        let num: u64 = TEST_VAL;
-        let point = Scalar::from(num) * G;
-        b.iter(|| {
-            let res = ecdlp::par_decode_scalar(
-                &view,
-                black_box(point),
-                ECDLPArguments::new_with_range(0, 1 << 63)
-                    .n_threads(2),
-            );
-            assert_eq!(res, Some(num as i64));
-        });
-    });
-
-    c.bench_function("par fast ecdlp T=4", |b| {
-        let num: u64 = TEST_VAL;
-        let point = Scalar::from(num) * G;
-        b.iter(|| {
-            let res = ecdlp::par_decode(
-                &view,
-                black_box(point),
-                ECDLPArguments::new_with_range(0, 1 << 63)
-                    .n_threads(4),
-            );
-            assert_eq!(res, Some(num as i64));
-        });
-    });
-
-    c.bench_function("par fast ecdlp T=4 scalar", |b| {
-        let num: u64 = TEST_VAL;
-        let point = Scalar::from(num) * G;
-        b.iter(|| {
-            let res = ecdlp::par_decode_scalar(
-                &view,
-                black_box(point),
-                ECDLPArguments::new_with_range(0, 1 << 63)
-                    .n_threads(4),
-            );
-            assert_eq!(res, Some(num as i64));
-        });
-    });
-
-    c.bench_function("par fast ecdlp T=8", |b| {
-        let num: u64 = TEST_VAL;
-        let point = Scalar::from(num) * G;
-        b.iter(|| {
-            let res = ecdlp::par_decode(
-                &view,
-                black_box(point),
-                ECDLPArguments::new_with_range(0, 1 << 63)
-                    .n_threads(8),
-            );
-            assert_eq!(res, Some(num as i64));
-        });
-    });
-
-    c.bench_function("par fast ecdlp T=8 scalar", |b| {
-        let num: u64 = TEST_VAL;
-        let point = Scalar::from(num) * G;
-        b.iter(|| {
-            let res = ecdlp::par_decode_scalar(
-                &view,
-                black_box(point),
-                ECDLPArguments::new_with_range(0, 1 << 63)
-                    .n_threads(8),
-            );
-            assert_eq!(res, Some(num as i64));
-        });
-    });
-
-    c.bench_function("par fast ecdlp T=16", |b| {
-        let num: u64 = TEST_VAL;
-        let point = Scalar::from(num) * G;
-        b.iter(|| {
-            let res = ecdlp::par_decode(
-                &view,
-                black_box(point),
-                ECDLPArguments::new_with_range(0, 1 << 63)
-                    .n_threads(16),
-            );
-            assert_eq!(res, Some(num as i64));
-        });
-    });
-
-    c.bench_function("par fast ecdlp T=16 scalar", |b| {
-        let num: u64 = TEST_VAL;
-        let point = Scalar::from(num) * G;
-        b.iter(|| {
-            let res = ecdlp::par_decode_scalar(
-                &view,
-                black_box(point),
-                ECDLPArguments::new_with_range(0, 1 << 63)
-                    .n_threads(16),
-            );
-            assert_eq!(res, Some(num as i64));
-        });
-    });
+    }
 
     c.bench_function("fast ecdlp find 0", |b| {
         let num: u64 = 0;
