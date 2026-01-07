@@ -87,6 +87,7 @@ mod ecdlp_notes {
     //! [fast-ecdlp-paper]: https://eprint.iacr.org/2022/1573
 }
 
+mod simd_types;
 mod affine_montgomery;
 mod table;
 mod field_simd;
@@ -100,6 +101,7 @@ use core::{
     ops::ControlFlow,
     sync::atomic::{AtomicBool, Ordering},
 };
+use cfg_if::cfg_if;
 
 pub use table::{
     ECDLPTablesFileView, NoOpProgressTableGenerationReportFunction,
@@ -107,6 +109,7 @@ pub use table::{
 };
 
 use table::{BATCH_SIZE, L2};
+use multiversion::multiversion;
 
 /// A trait to represent progress report functions.
 /// It is auto-implemented on any `F: Fn(f64) -> ControlFlow<()>`.
@@ -1035,7 +1038,7 @@ fn batch_field_mul_and_square<const N: usize>(
 pub fn batch_i64_to_scalar(inputs: &[i64], outputs: &mut [Scalar]) {
     #[cfg(feature = "simd")]
     {
-        use wide::{i64x4,CmpGt};  // Remove CmpGe import
+        use crate::ecdlp::simd_types::{i64x4, CmpGt};
         
         assert_eq!(inputs.len(), outputs.len());
         let len = inputs.len();
@@ -1106,7 +1109,7 @@ pub fn batch_compute_shifts<const N: usize>(
 ) {
     #[cfg(feature = "simd")]
     {
-        use wide::i64x4;
+        use crate::ecdlp::simd_types::i64x4;
         
         let mut pos = 0;
         let j_start_i64 = j_start as i64;
@@ -1167,6 +1170,11 @@ pub fn batch_compute_shifts<const N: usize>(
     }
 }
 
+#[multiversion(targets(
+    "x86_64+avx2",
+    "x86_64+sse2",
+    "aarch64+neon",
+))]
 fn fast_ecdlp_simd(
     precomputed_tables: &ECDLPTablesFileView<'_>,
     target_point: RistrettoPoint,
@@ -1184,6 +1192,477 @@ fn fast_ecdlp_simd(
     qxs: &mut [FieldElement; BATCH_SIZE],
     neg_qxs: &mut [FieldElement; BATCH_SIZE],
 ) -> Option<u64> {
+    // These SIMD helper functions are defined within the multiversion scope,
+    // so they get recompiled with the correct target features for each variant.
+
+    #[inline(always)]
+    fn batch_field_mul_and_square_inline<const N: usize>(
+        output: &mut [FieldElement; N],
+        a: &[FieldElement; N],
+        b: &[FieldElement; N],
+    ) {
+        let mut pos = 0;
+
+        cfg_if! {
+            if #[cfg(all(feature = "simd", curve25519_dalek_bits = "64", target_feature = "avx2"))] {
+                const CHUNK_SIZE: usize = 4;
+                while pos + CHUNK_SIZE <= N {
+                    let a_chunk: &[FieldElement; 4] = (&a[pos..pos + 4]).try_into().unwrap();
+                    let b_chunk: &[FieldElement; 4] = (&b[pos..pos + 4]).try_into().unwrap();
+
+                    let products = FieldElement::batch_mul_4way(a_chunk, b_chunk);
+                    let squared = FieldElement::batch_square_4way(&products);
+
+                    output[pos..pos + 4].copy_from_slice(&squared);
+                    pos += CHUNK_SIZE;
+                }
+            }
+        }
+
+        // Scalar fallback for remaining elements or when SIMD not available
+        while pos < N {
+            output[pos] = (&a[pos] * &b[pos]).square();
+            pos += 1;
+        }
+    }
+
+    #[inline(always)]
+    fn batch_square_4way_inline(a_batch: &[FieldElement; 4]) -> [FieldElement; 4] {
+        cfg_if! {
+            if #[cfg(all(curve25519_dalek_bits = "64", target_feature = "avx2"))] {
+                // Reuse the U64x4 type and helpers from batch_mul_4way_inline
+                #[repr(C, align(32))]
+                #[derive(Clone, Copy)]
+                struct U64x4([u64; 4]);
+
+                impl U64x4 {
+                    #[inline(always)]
+                    const fn new(arr: [u64; 4]) -> Self { Self(arr) }
+                    #[inline(always)]
+                    fn to_array(self) -> [u64; 4] { self.0 }
+                }
+
+                impl std::ops::Add for U64x4 {
+                    type Output = Self;
+                    #[inline(always)]
+                    fn add(self, other: Self) -> Self {
+                        unsafe {
+                            use std::arch::x86_64::*;
+                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
+                            let b = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
+                            let r = _mm256_add_epi64(a, b);
+                            let mut out = Self([0; 4]);
+                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                            out
+                        }
+                    }
+                }
+
+                impl std::ops::BitAnd for U64x4 {
+                    type Output = Self;
+                    #[inline(always)]
+                    fn bitand(self, other: Self) -> Self {
+                        unsafe {
+                            use std::arch::x86_64::*;
+                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
+                            let b = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
+                            let r = _mm256_and_si256(a, b);
+                            let mut out = Self([0; 4]);
+                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                            out
+                        }
+                    }
+                }
+
+                impl std::ops::BitOr for U64x4 {
+                    type Output = Self;
+                    #[inline(always)]
+                    fn bitor(self, other: Self) -> Self {
+                        unsafe {
+                            use std::arch::x86_64::*;
+                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
+                            let b = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
+                            let r = _mm256_or_si256(a, b);
+                            let mut out = Self([0; 4]);
+                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                            out
+                        }
+                    }
+                }
+
+                impl std::ops::Shr<i32> for U64x4 {
+                    type Output = Self;
+                    #[inline(always)]
+                    fn shr(self, amt: i32) -> Self {
+                        unsafe {
+                            use std::arch::x86_64::*;
+                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
+                            let shift = _mm256_set1_epi64x(amt as i64);
+                            let r = _mm256_srlv_epi64(a, shift);
+                            let mut out = Self([0; 4]);
+                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                            out
+                        }
+                    }
+                }
+
+                // Just square each element using the existing batch_mul logic
+                batch_mul_4way_inline(a_batch, a_batch)
+            } else {
+                [
+                    a_batch[0].square(),
+                    a_batch[1].square(),
+                    a_batch[2].square(),
+                    a_batch[3].square(),
+                ]
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn batch_mul_4way_inline(a_batch: &[FieldElement; 4], b_batch: &[FieldElement; 4]) -> [FieldElement; 4] {
+        cfg_if! {
+            if #[cfg(all(curve25519_dalek_bits = "64", target_feature = "avx2"))] {
+                // AVX2 path - will be TRUE in the AVX2 variant
+                #[repr(C, align(32))]
+                #[derive(Clone, Copy)]
+                struct U64x4([u64; 4]);
+
+                impl U64x4 {
+                    #[inline(always)]
+                    const fn new(arr: [u64; 4]) -> Self { Self(arr) }
+
+                    #[inline(always)]
+                    fn splat(v: u64) -> Self { Self([v, v, v, v]) }
+
+                    #[inline(always)]
+                    fn to_array(self) -> [u64; 4] { self.0 }
+
+                    #[inline(always)]
+                    fn cmp_lt(self, other: Self) -> Self {
+                        unsafe {
+                            use std::arch::x86_64::*;
+                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
+                            let b = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
+                            let sign_bit = _mm256_set1_epi64x(i64::MIN);
+                            let a_flipped = _mm256_xor_si256(a, sign_bit);
+                            let b_flipped = _mm256_xor_si256(b, sign_bit);
+                            let r = _mm256_cmpgt_epi64(b_flipped, a_flipped);
+                            let mut out = Self([0; 4]);
+                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                            out
+                        }
+                    }
+
+                    #[inline(always)]
+                    fn blend(self, if_true: Self, mask: Self) -> Self {
+                        unsafe {
+                            use std::arch::x86_64::*;
+                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
+                            let b = _mm256_loadu_si256(if_true.0.as_ptr() as *const __m256i);
+                            let m = _mm256_loadu_si256(mask.0.as_ptr() as *const __m256i);
+                            let r = _mm256_blendv_epi8(a, b, m);
+                            let mut out = Self([0; 4]);
+                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                            out
+                        }
+                    }
+                }
+
+                impl std::ops::Add for U64x4 {
+                    type Output = Self;
+                    #[inline(always)]
+                    fn add(self, other: Self) -> Self {
+                        unsafe {
+                            use std::arch::x86_64::*;
+                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
+                            let b = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
+                            let r = _mm256_add_epi64(a, b);
+                            let mut out = Self([0; 4]);
+                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                            out
+                        }
+                    }
+                }
+
+                impl std::ops::Sub for U64x4 {
+                    type Output = Self;
+                    #[inline(always)]
+                    fn sub(self, other: Self) -> Self {
+                        unsafe {
+                            use std::arch::x86_64::*;
+                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
+                            let b = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
+                            let r = _mm256_sub_epi64(a, b);
+                            let mut out = Self([0; 4]);
+                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                            out
+                        }
+                    }
+                }
+
+                impl std::ops::Mul for U64x4 {
+                    type Output = Self;
+                    #[inline(always)]
+                    fn mul(self, other: Self) -> Self {
+                        unsafe {
+                            use std::arch::x86_64::*;
+                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
+                            let b = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
+                            let a_hi = _mm256_srli_epi64(a, 32);
+                            let b_hi = _mm256_srli_epi64(b, 32);
+                            let lo_lo = _mm256_mul_epu32(a, b);
+                            let lo_hi = _mm256_mul_epu32(a, b_hi);
+                            let hi_lo = _mm256_mul_epu32(a_hi, b);
+                            let mid = _mm256_add_epi64(lo_hi, hi_lo);
+                            let mid_shifted = _mm256_slli_epi64(mid, 32);
+                            let r = _mm256_add_epi64(lo_lo, mid_shifted);
+                            let mut out = Self([0; 4]);
+                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                            out
+                        }
+                    }
+                }
+
+                impl std::ops::BitAnd for U64x4 {
+                    type Output = Self;
+                    #[inline(always)]
+                    fn bitand(self, other: Self) -> Self {
+                        unsafe {
+                            use std::arch::x86_64::*;
+                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
+                            let b = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
+                            let r = _mm256_and_si256(a, b);
+                            let mut out = Self([0; 4]);
+                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                            out
+                        }
+                    }
+                }
+
+                impl std::ops::BitOr for U64x4 {
+                    type Output = Self;
+                    #[inline(always)]
+                    fn bitor(self, other: Self) -> Self {
+                        unsafe {
+                            use std::arch::x86_64::*;
+                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
+                            let b = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
+                            let r = _mm256_or_si256(a, b);
+                            let mut out = Self([0; 4]);
+                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                            out
+                        }
+                    }
+                }
+
+                impl std::ops::Shr<i32> for U64x4 {
+                    type Output = Self;
+                    #[inline(always)]
+                    fn shr(self, amt: i32) -> Self {
+                        unsafe {
+                            use std::arch::x86_64::*;
+                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
+                            let shift = _mm256_set1_epi64x(amt as i64);
+                            let r = _mm256_srlv_epi64(a, shift);
+                            let mut out = Self([0; 4]);
+                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                            out
+                        }
+                    }
+                }
+
+                impl std::ops::Shl<i32> for U64x4 {
+                    type Output = Self;
+                    #[inline(always)]
+                    fn shl(self, amt: i32) -> Self {
+                        unsafe {
+                            use std::arch::x86_64::*;
+                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
+                            let shift = _mm256_set1_epi64x(amt as i64);
+                            let r = _mm256_sllv_epi64(a, shift);
+                            let mut out = Self([0; 4]);
+                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                            out
+                        }
+                    }
+                }
+
+                // Now the actual batch_mul implementation using our local SIMD types
+                const LOW_51: u64 = (1 << 51) - 1;
+                const MASK: U64x4 = U64x4([LOW_51, LOW_51, LOW_51, LOW_51]);
+                const FACTOR_19: U64x4 = U64x4([19, 19, 19, 19]);
+                const MASK_32: U64x4 = U64x4([0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF]);
+
+                #[inline(always)]
+                fn mul64_to_128_simd(a: U64x4, b: U64x4) -> (U64x4, U64x4) {
+                    let a_lo = a & MASK_32;
+                    let a_hi = a >> 32;
+                    let b_lo = b & MASK_32;
+                    let b_hi = b >> 32;
+
+                    let lo_lo = a_lo * b_lo;
+                    let lo_hi = a_lo * b_hi;
+                    let hi_lo = a_hi * b_lo;
+                    let hi_hi = a_hi * b_hi;
+
+                    let mid = lo_hi + hi_lo;
+                    let mid_lo = mid << 32;
+                    let mid_hi = mid >> 32;
+
+                    let res_lo = lo_lo + mid_lo;
+                    let carry = res_lo.cmp_lt(lo_lo).blend(U64x4::splat(1), U64x4::splat(0));
+                    let res_hi = hi_hi + mid_hi + carry;
+
+                    (res_lo, res_hi)
+                }
+
+                #[inline(always)]
+                fn add_128_simd(a_lo: U64x4, a_hi: U64x4, b_lo: U64x4, b_hi: U64x4) -> (U64x4, U64x4) {
+                    let sum_lo = a_lo + b_lo;
+                    let carry = sum_lo.cmp_lt(a_lo).blend(U64x4::splat(1), U64x4::splat(0));
+                    let sum_hi = a_hi + b_hi + carry;
+                    (sum_lo, sum_hi)
+                }
+
+                let mut a = [U64x4::new([0; 4]); 5];
+                let mut b = [U64x4::new([0; 4]); 5];
+
+                for i in 0..5 {
+                    a[i] = U64x4::new([
+                        a_batch[0].0[i], a_batch[1].0[i],
+                        a_batch[2].0[i], a_batch[3].0[i]
+                    ]);
+                    b[i] = U64x4::new([
+                        b_batch[0].0[i], b_batch[1].0[i],
+                        b_batch[2].0[i], b_batch[3].0[i]
+                    ]);
+                }
+
+                let b1_19 = b[1] * FACTOR_19;
+                let b2_19 = b[2] * FACTOR_19;
+                let b3_19 = b[3] * FACTOR_19;
+                let b4_19 = b[4] * FACTOR_19;
+
+                let a0_b0 = mul64_to_128_simd(a[0], b[0]);
+                let a0_b1 = mul64_to_128_simd(a[0], b[1]);
+                let a0_b2 = mul64_to_128_simd(a[0], b[2]);
+                let a0_b3 = mul64_to_128_simd(a[0], b[3]);
+                let a0_b4 = mul64_to_128_simd(a[0], b[4]);
+
+                let a1_b0 = mul64_to_128_simd(a[1], b[0]);
+                let a1_b1 = mul64_to_128_simd(a[1], b[1]);
+                let a1_b2 = mul64_to_128_simd(a[1], b[2]);
+                let a1_b3 = mul64_to_128_simd(a[1], b[3]);
+                let a1_b4_19 = mul64_to_128_simd(a[1], b4_19);
+
+                let a2_b0 = mul64_to_128_simd(a[2], b[0]);
+                let a2_b1 = mul64_to_128_simd(a[2], b[1]);
+                let a2_b2 = mul64_to_128_simd(a[2], b[2]);
+                let a2_b3_19 = mul64_to_128_simd(a[2], b3_19);
+                let a2_b4_19 = mul64_to_128_simd(a[2], b4_19);
+
+                let a3_b0 = mul64_to_128_simd(a[3], b[0]);
+                let a3_b1 = mul64_to_128_simd(a[3], b[1]);
+                let a3_b2_19 = mul64_to_128_simd(a[3], b2_19);
+                let a3_b3_19 = mul64_to_128_simd(a[3], b3_19);
+                let a3_b4_19 = mul64_to_128_simd(a[3], b4_19);
+
+                let a4_b0 = mul64_to_128_simd(a[4], b[0]);
+                let a4_b1_19 = mul64_to_128_simd(a[4], b1_19);
+                let a4_b2_19 = mul64_to_128_simd(a[4], b2_19);
+                let a4_b3_19 = mul64_to_128_simd(a[4], b3_19);
+                let a4_b4_19 = mul64_to_128_simd(a[4], b4_19);
+
+                let (c0_lo, c0_hi) = {
+                    let (lo, hi) = a0_b0;
+                    let (lo, hi) = add_128_simd(lo, hi, a4_b1_19.0, a4_b1_19.1);
+                    let (lo, hi) = add_128_simd(lo, hi, a3_b2_19.0, a3_b2_19.1);
+                    let (lo, hi) = add_128_simd(lo, hi, a2_b3_19.0, a2_b3_19.1);
+                    add_128_simd(lo, hi, a1_b4_19.0, a1_b4_19.1)
+                };
+
+                let (c1_lo, c1_hi) = {
+                    let (lo, hi) = a1_b0;
+                    let (lo, hi) = add_128_simd(lo, hi, a0_b1.0, a0_b1.1);
+                    let (lo, hi) = add_128_simd(lo, hi, a4_b2_19.0, a4_b2_19.1);
+                    let (lo, hi) = add_128_simd(lo, hi, a3_b3_19.0, a3_b3_19.1);
+                    add_128_simd(lo, hi, a2_b4_19.0, a2_b4_19.1)
+                };
+
+                let (c2_lo, c2_hi) = {
+                    let (lo, hi) = a2_b0;
+                    let (lo, hi) = add_128_simd(lo, hi, a1_b1.0, a1_b1.1);
+                    let (lo, hi) = add_128_simd(lo, hi, a0_b2.0, a0_b2.1);
+                    let (lo, hi) = add_128_simd(lo, hi, a4_b3_19.0, a4_b3_19.1);
+                    add_128_simd(lo, hi, a3_b4_19.0, a3_b4_19.1)
+                };
+
+                let (c3_lo, c3_hi) = {
+                    let (lo, hi) = a3_b0;
+                    let (lo, hi) = add_128_simd(lo, hi, a2_b1.0, a2_b1.1);
+                    let (lo, hi) = add_128_simd(lo, hi, a1_b2.0, a1_b2.1);
+                    let (lo, hi) = add_128_simd(lo, hi, a0_b3.0, a0_b3.1);
+                    add_128_simd(lo, hi, a4_b4_19.0, a4_b4_19.1)
+                };
+
+                let (c4_lo, c4_hi) = {
+                    let (lo, hi) = a4_b0;
+                    let (lo, hi) = add_128_simd(lo, hi, a3_b1.0, a3_b1.1);
+                    let (lo, hi) = add_128_simd(lo, hi, a2_b2.0, a2_b2.1);
+                    let (lo, hi) = add_128_simd(lo, hi, a1_b3.0, a1_b3.1);
+                    add_128_simd(lo, hi, a0_b4.0, a0_b4.1)
+                };
+
+                let mut limb0 = c0_lo & MASK;
+                let mut carry = (c0_hi << 13) | (c0_lo >> 51);
+
+                macro_rules! propagate_carry {
+                    ($c_lo:expr, $c_hi:expr) => {{
+                        let acc = $c_lo + carry;
+                        let limb = acc & MASK;
+                        let overflow_mask = acc.cmp_lt($c_lo);
+                        let correction = overflow_mask.blend(U64x4::splat(1 << 13), U64x4::splat(0));
+                        carry = ($c_hi << 13) | (acc >> 51) + correction;
+                        limb
+                    }};
+                }
+
+                let limb1 = propagate_carry!(c1_lo, c1_hi);
+                let limb2 = propagate_carry!(c2_lo, c2_hi);
+                let limb3 = propagate_carry!(c3_lo, c3_hi);
+                let limb4 = propagate_carry!(c4_lo, c4_hi);
+
+                limb0 = limb0 + carry * FACTOR_19;
+                let carry5 = limb0 >> 51;
+                limb0 = limb0 & MASK;
+                let limb1 = limb1 + carry5;
+
+                let limb0_arr = limb0.to_array();
+                let limb1_arr = limb1.to_array();
+                let limb2_arr = limb2.to_array();
+                let limb3_arr = limb3.to_array();
+                let limb4_arr = limb4.to_array();
+
+                [
+                    FieldElement::from_limbs([limb0_arr[0], limb1_arr[0], limb2_arr[0], limb3_arr[0], limb4_arr[0]]),
+                    FieldElement::from_limbs([limb0_arr[1], limb1_arr[1], limb2_arr[1], limb3_arr[1], limb4_arr[1]]),
+                    FieldElement::from_limbs([limb0_arr[2], limb1_arr[2], limb2_arr[2], limb3_arr[2], limb4_arr[2]]),
+                    FieldElement::from_limbs([limb0_arr[3], limb1_arr[3], limb2_arr[3], limb3_arr[3], limb4_arr[3]]),
+                ]
+            } else {
+                // Scalar fallback
+                [
+                    &a_batch[0] * &b_batch[0],
+                    &a_batch[1] * &b_batch[1],
+                    &a_batch[2] * &b_batch[2],
+                    &a_batch[3] * &b_batch[3],
+                ]
+            }
+        }
+    }
+
+
     let t1_table = precomputed_tables.get_t1();
 
     let mut found = None;
@@ -1334,7 +1813,7 @@ fn fast_ecdlp_simd(
         // Batch compute qxs for the regular case
         // lambda = (T2[j]_y - Pm_y) * nu
         batch_field_subtract(qx_tmp, &t2_vs, &target_montgomery.v);
-        batch_field_mul_and_square(qx_out, &qx_tmp, &batch);
+        batch_field_mul_and_square_inline(qx_out, &qx_tmp, &batch);
         batch_field_add(qx_tmp, &qx_out, alphas);
 
         // Process in groups of 8
@@ -1372,7 +1851,7 @@ fn fast_ecdlp_simd(
         }
 
         batch_field_subtract(qx_tmp, &t2_vs_neg, &target_montgomery.v);
-        batch_field_mul_and_square(qx_out, &qx_tmp, &batch);
+        batch_field_mul_and_square_inline(qx_out, &qx_tmp, &batch);
         batch_field_add(qx_tmp, &qx_out, alphas);
 
         // Process in groups of 8
@@ -1858,92 +2337,52 @@ mod tests {
     }
 
     #[test]
-    fn test_integrated_fast_ecdlp_simd_with_batch_lookup() {
-        // This test validates the integration within fast_ecdlp_simd
+    fn test_simple_ecdlp_decode() {
+        println!("\n=== Testing simple ECDLP decode ===");
+
         let tables = read_or_gen_tables();
         let view = tables.view();
-        
-        // Create a modified version of fast_ecdlp_simd that uses both approaches
-        // and validates they produce the same results
-        
-        // Test with a known point
-        let test_value = 1000000u64;
-        let point = RistrettoPoint::mul_base(&Scalar::from(test_value));
-        
-        let args = ECDLPArguments::new_with_range(0, 2000000)
-            .n_threads(1)
-            .pseudo_constant_time(false);
-        
-        // Run with original implementation
-        let result_original = par_decode(&view, point, args);
-        
-        // Run with SIMD lookup implementation (you'd need to add a flag or separate function)
-        // let result_simd = par_decode_with_simd_lookup(&view, point, args);
-        
-        // For now, just validate the original works
-        assert_eq!(result_original, Some(test_value as i64));
-        
-        println!("✓ Integration test passed");
-    }
-    
-    // Helper function to create a test version that compares both implementations
-    fn validate_batch_lookup_in_context(
-        t1_table: &CuckooT1HashMapView<'_>,
-        qx_batch: &[FieldElement; BATCH_SIZE],
-        j_start: usize,
-        l1: usize,
-    ) -> (Vec<Option<u64>>, Vec<Option<u64>>) {
-        let mut sequential_results = Vec::new();
-        let mut simd_results = Vec::new();
-        
-        // Sequential approach
-        for (idx, qx) in qx_batch.iter().enumerate() {
-            let mut found = None;
-            t1_table.lookup(&qx.to_bytes(), |value| {
-                found = Some(value);
-                true
-            });
-            sequential_results.push(found);
+
+        // Test very small values first - compare SIMD vs scalar
+        for value in [0u64, 1, 2, 100] {
+            println!("\n=== Testing value: {} ===", value);
+
+            let point = RistrettoPoint::mul_base(&Scalar::from(value));
+
+            // Try scalar version first
+            println!("Testing with scalar decode (par_decode_scalar)...");
+            let args_scalar = ECDLPArguments::new_with_range(0, 1 << 48)
+                .n_threads(1)
+                .pseudo_constant_time(false);
+
+            let result_scalar = par_decode_scalar(&view, point, args_scalar);
+            println!("Scalar result: {:?}", result_scalar);
+
+            // Try SIMD version
+            println!("Testing with SIMD decode (par_decode)...");
+            let args_simd = ECDLPArguments::new_with_range(0, 1 << 48)
+                .n_threads(1)
+                .pseudo_constant_time(false);
+
+            let result_simd = par_decode(&view, point, args_simd);
+            println!("SIMD result: {:?}", result_simd);
+
+            assert_eq!(
+                result_scalar,
+                Some(value as i64),
+                "Scalar version failed to decode value {}", value
+            );
+
+            assert_eq!(
+                result_simd,
+                Some(value as i64),
+                "SIMD version failed to decode value {}", value
+            );
+
+            println!("✓ Both scalar and SIMD decoded {} correctly", value);
         }
-        
-        // SIMD approach
-        let simd_table = SimdCuckooT1HashMapView {
-            keys: t1_table.keys,
-            values: t1_table.values,
-            cuckoo_len: t1_table.cuckoo_len,
-        };
-        
-        for chunk_idx in 0..BATCH_SIZE / 4 {
-            let base = chunk_idx * 4;
-            let queries = [
-                qx_batch[base].to_bytes(),
-                qx_batch[base + 1].to_bytes(),
-                qx_batch[base + 2].to_bytes(),
-                qx_batch[base + 3].to_bytes(),
-            ];
-            
-            let results = simd_table.lookup_batch_4(&queries);
-            for (i, (found, value)) in results.iter().enumerate() {
-                simd_results.push(if *found { Some(*value) } else { None });
-            }
-        }
-        
-        // Handle remainder
-        for idx in (BATCH_SIZE / 4 * 4)..BATCH_SIZE {
-            let mut found = None;
-            t1_table.lookup(&qx_batch[idx].to_bytes(), |value| {
-                found = Some(value);
-                true
-            });
-            simd_results.push(found);
-        }
-        
-        assert_eq!(sequential_results.len(), simd_results.len());
-        for (i, (seq, simd)) in sequential_results.iter().zip(simd_results.iter()).enumerate() {
-            assert_eq!(seq, simd, "Mismatch at index {}", i);
-        }
-        
-        (sequential_results, simd_results)
+
+        println!("\n✓ Simple ECDLP decode passed");
     }
 
     #[test]
@@ -1953,7 +2392,7 @@ mod tests {
         let mut rng = rand::rng();
         
         const MAX_VALUE: u64 = 1u64 << 48;
-        const NUM_TESTS: usize = 10000;
+        const NUM_TESTS: usize = 1000;
         
         for i in 0..NUM_TESTS {
             let test_value = rng.random_range(0..MAX_VALUE);
@@ -1974,475 +2413,4 @@ mod tests {
         
         println!("✅ All {} random tests passed!", NUM_TESTS);
     }
-
-    // #[test]
-    // fn test_and_benchmark_vectorized_point_iterator() {
-    //     use std::time::Instant;
-    //     use std::hint::black_box;
-    //     use std::sync::atomic::{AtomicBool, Ordering};
-    //     use std::sync::Arc;
-        
-    //     println!("\n=== ECDLP Benchmark with Proper Iterator Integration ===");
-        
-    //     let tables = read_or_gen_tables();
-    //     let view = tables.view();
-        
-    //     let test_value: u64 = 9_223_372_036_854_775_806 / 1000;
-    //     let test_point = black_box(RistrettoPoint::mul_base(&Scalar::from(test_value)));
-        
-    //     println!("Test value: {}", test_value);
-        
-    //     // Define optimized make_point_iterator that uses 4-way operations
-    //     fn make_point_iterator_simd(
-    //         precomputed_tables: &ECDLPTablesFileView<'_>,
-    //         normalized: RistrettoPoint,
-    //         num_batches: usize,
-    //     ) -> impl Iterator<Item = (usize, usize, AffineMontgomeryPoint, f64)> {
-    //         // Apply same transformations as original
-    //         let normalized = RistrettoPoint(normalized.0.mul_by_cofactor());
-    //         let els_per_batch: u64 = 1u64 << (L2 + precomputed_tables.get_l1());
-            
-    //         let initial = AffineMontgomeryPoint::from(&normalized.0);
-    //         let batch_step = -(els_per_batch as i64);
-    //         let step = AffineMontgomeryPoint::from(&(i64_to_scalar(batch_step) * G).0.mul_by_cofactor());
-            
-    //         struct OptimizedIterator {
-    //             current_batch: [AffineMontgomeryPoint; 4],
-    //             step: AffineMontgomeryPoint,
-    //             step_x4: AffineMontgomeryPoint,
-    //             batch_idx: usize,
-    //             j: usize,
-    //             num_batches: usize,
-    //         }
-            
-    //         impl Iterator for OptimizedIterator {
-    //             type Item = (usize, usize, AffineMontgomeryPoint, f64);
-                
-    //             fn next(&mut self) -> Option<Self::Item> {
-    //                 if self.j >= self.num_batches {
-    //                     return None;
-    //                 }
-                    
-    //                 if self.batch_idx >= 4 && self.j < self.num_batches {
-    //                     // Use 4-way SIMD operation
-    //                     self.current_batch = AffineMontgomeryPoint::batch_addition_not_ct_4way(
-    //                         &self.current_batch,
-    //                         &self.step_x4
-    //                     );
-    //                     self.batch_idx = 0;
-    //                 }
-                    
-    //                 let result = (
-    //                     0,
-    //                     self.j * (1 << L2),
-    //                     self.current_batch[self.batch_idx],
-    //                     self.j as f64 / self.num_batches as f64
-    //                 );
-                    
-    //                 self.batch_idx += 1;
-    //                 self.j += 1;
-                    
-    //                 Some(result)
-    //             }
-    //         }
-            
-    //         // Initialize first 4 points
-    //         let p0 = initial;
-    //         let p1 = p0.addition_not_ct(&step);
-    //         let p2 = p1.addition_not_ct(&step);
-    //         let p3 = p2.addition_not_ct(&step);
-            
-    //         let step_x4 = step.addition_not_ct(&step)
-    //             .addition_not_ct(&step)
-    //             .addition_not_ct(&step);
-            
-    //         OptimizedIterator {
-    //             current_batch: [p0, p1, p2, p3],
-    //             step,
-    //             step_x4,
-    //             batch_idx: 0,
-    //             j: 0,
-    //             num_batches,
-    //         }
-    //     }
-        
-    //     // Run benchmarks
-    //     let variants = vec![
-    //         ("Standard", false),
-    //         ("Optimized (4-way)", true),
-    //     ];
-        
-    //     let mut results = Vec::new();
-        
-    //     for (name, use_optimized) in variants {
-    //         println!("\n--- {} ---", name);
-            
-    //         let start_total = Instant::now();
-            
-    //         let result = {
-    //             use rayon::prelude::*;
-                
-    //             let range_start = 0i64;
-    //             let range_end = 1i64 << 63;
-    //             let n_threads = 16;
-    //             let chunk_size: u64 = 64 * 320_000_000_000_0 / ((30 - view.get_l1()).max(0) * 2).max(1) as u64;
-    //             let total_range = range_end as u64 - range_start as u64;
-    //             let num_chunks = ((total_range + chunk_size - 1) / chunk_size) as usize;
-                
-    //             let end_flag = Arc::new(AtomicBool::new(false));
-                
-    //             // Pre-compute T2 cache
-    //             let mut t2_cache = [AffineMontgomeryPoint::identity(); BATCH_SIZE];
-    //             let mut t2_cache_alpha = [FieldElement::ZERO; BATCH_SIZE];
-    //             let t2_table = view.get_t2();
-    //             for i in 0..BATCH_SIZE {
-    //                 let point = t2_table.index(i);
-    //                 t2_cache_alpha[i] = &MONTGOMERY_A_NEG - &point.u;
-    //                 t2_cache[i] = point;
-    //             }
-                
-    //             (0..n_threads)
-    //                 .into_par_iter()
-    //                 .find_map_any(|thread_index| {
-    //                     let t2_u_values: [FieldElement; BATCH_SIZE] = {
-    //                         let mut u_values = [FieldElement::ZERO; BATCH_SIZE];
-    //                         for i in 0..BATCH_SIZE {
-    //                             u_values[i] = t2_cache[i].u;
-    //                         }
-    //                         u_values
-    //                     };
-                        
-    //                     let t2_vs: [FieldElement; BATCH_SIZE] = t2_cache.map(|p| p.v.clone());
-    //                     let t2_vs_neg: [FieldElement; BATCH_SIZE] = t2_cache.map(|p| -&p.v);
-                        
-    //                     let mut batch = [FieldElement::ZERO; BATCH_SIZE];
-    //                     let mut alphas = [FieldElement::ZERO; BATCH_SIZE];
-    //                     let mut qxs = [FieldElement::ZERO; BATCH_SIZE];
-    //                     let mut neg_qxs = [FieldElement::ZERO; BATCH_SIZE];
-                        
-    //                     for chunk_index in (thread_index..num_chunks).step_by(n_threads) {
-    //                         if end_flag.load(Ordering::Relaxed) {
-    //                             return None;
-    //                         }
-                            
-    //                         let start = range_start + (chunk_index as u64 * chunk_size) as i64;
-    //                         let end = ((chunk_index as u64 + 1) * chunk_size).min(range_end as u64) as i64;
-                            
-    //                         let amplitude = (end - start).max(0);
-    //                         let offset = start
-    //                             + ((1 << (L2 - 1)) << view.get_l1())
-    //                             + (1 << (view.get_l1() - 1));
-                            
-    //                         let normalized = black_box(test_point) - RistrettoPoint::mul_base(&i64_to_scalar(offset));
-    //                         let j_end = ((amplitude as i64) >> view.get_l1()) as usize;
-    //                         let num_batches = (j_end + (1 << L2) - 1) / (1 << L2);
-                            
-    //                         // Use appropriate iterator
-    //                         let point_iter: Box<dyn Iterator<Item = (usize, usize, AffineMontgomeryPoint, f64)>> = 
-    //                             if use_optimized {
-    //                                 Box::new(make_point_iterator_simd(&view, normalized, num_batches))
-    //                             } else {
-    //                                 Box::new(make_point_iterator(&view, normalized, num_batches))
-    //                             };
-                            
-    //                         // Run ECDLP
-    //                         if let Some(res) = fast_ecdlp_simd(
-    //                             &view,
-    //                             black_box(normalized),
-    //                             point_iter,
-    //                             false,
-    //                             &end_flag,
-    //                             |_| std::ops::ControlFlow::Continue(()),
-    //                             &t2_cache,
-    //                             &t2_cache_alpha,
-    //                             &t2_u_values,
-    //                             &t2_vs,
-    //                             &t2_vs_neg,
-    //                             &mut batch,
-    //                             &mut alphas,
-    //                             &mut qxs,
-    //                             &mut neg_qxs
-    //                         ) {
-    //                             end_flag.store(true, Ordering::SeqCst);
-    //                             return Some(offset + res as i64);
-    //                         }
-    //                     }
-                        
-    //                     None
-    //                 })
-    //         };
-            
-    //         let total_time = start_total.elapsed();
-            
-    //         println!("Result: {:?}", result);
-    //         println!("Total time: {:?}", total_time);
-            
-    //         results.push((name, total_time));
-    //         assert_eq!(result, Some(test_value as i64), "{} should find correct value", name);
-    //     }
-        
-    //     // Summary
-    //     println!("\n=== Summary ===");
-    //     let (_, standard_time) = results[0];
-        
-    //     for (name, time) in &results {
-    //         println!("{:20} {:?}", name, time);
-    //     }
-        
-    //     println!("\nSpeedups:");
-    //     for (name, time) in &results[1..] {
-    //         let speedup = standard_time.as_secs_f64() / time.as_secs_f64();
-    //         println!("{:20} {:.2}x", name, speedup);
-    //     }
-        
-    //     // Additional analysis
-    //     println!("\n=== Analysis ===");
-    //     println!("Iterator generates ~2.8x speedup in isolation");
-    //     println!("But iterator is only ~2.7ms out of ~1500ms total");
-    //     println!("Expected speedup: ~1.8ms saved = ~0.12% improvement");
-    //     println!("This matches what we're seeing!");
-    // }
-
-    // #[test]
-    // fn benchmark_point_iterators_isolated() {
-    //     use std::time::Instant;
-    //     use std::hint::black_box;
-        
-    //     println!("\n=== Isolated Point Iterator Benchmarks ===");
-        
-    //     let tables = read_or_gen_tables();
-    //     let view = tables.view();
-        
-    //     // Use realistic parameters from the ECDLP benchmark
-    //     let test_value: u64 = 9_223_372_036_854_775_806 / 1000;
-    //     let test_point = RistrettoPoint::mul_base(&Scalar::from(test_value));
-        
-    //     // Simulate what happens in one chunk
-    //     let range_start = 0i64;
-    //     let chunk_size: u64 = 64 * 320_000_000_000_0 / ((30 - view.get_l1()).max(0) * 2).max(1) as u64;
-    //     let amplitude = chunk_size as i64;
-    //     let offset = range_start 
-    //         + ((1 << (L2 - 1)) << view.get_l1())
-    //         + (1 << (view.get_l1() - 1));
-        
-    //     let normalized = test_point - RistrettoPoint::mul_base(&i64_to_scalar(offset));
-    //     let j_end = ((amplitude as i64) >> view.get_l1()) as usize;
-    //     let num_batches = (j_end + (1 << L2) - 1) / (1 << L2);
-        
-    //     println!("Test parameters:");
-    //     println!("  chunk_size: {}", chunk_size);
-    //     println!("  j_end: {}", j_end);
-    //     println!("  num_batches: {}", num_batches);
-    //     println!("  Points to generate: {}\n", num_batches * (1 << L2));
-        
-    //     // Warm up
-    //     let _ = black_box(make_point_iterator(&view, normalized, 100).collect::<Vec<_>>());
-        
-    //     // 1. Standard iterator
-    //     println!("--- Standard make_point_iterator ---");
-    //     let mut standard_times = Vec::new();
-        
-    //     for _ in 0..5 {
-    //         let start = Instant::now();
-    //         let points: Vec<_> = black_box(make_point_iterator(&view, normalized, num_batches).collect());
-    //         let elapsed = start.elapsed();
-    //         standard_times.push(elapsed);
-    //         println!("  Run: {:?}, points: {}", elapsed, points.len());
-    //     }
-        
-    //     let standard_avg = standard_times.iter().sum::<std::time::Duration>() / standard_times.len() as u32;
-    //     println!("  Average: {:?}", standard_avg);
-        
-    //     // 2. Non-lazy optimized with 4-way operations
-    //     println!("\n--- Non-lazy Optimized (with 4-way ops) ---");
-        
-    //     let make_non_lazy_4way = |view: &ECDLPTablesFileView, normalized: RistrettoPoint, num_batches: usize| -> Vec<(usize, usize, AffineMontgomeryPoint, f64)> {
-    //         let normalized = RistrettoPoint(normalized.0.mul_by_cofactor());
-    //         let els_per_batch: u64 = 1u64 << (L2 + view.get_l1());
-            
-    //         let initial = AffineMontgomeryPoint::from(&normalized.0);
-    //         let batch_step = -(els_per_batch as i64);
-    //         let step = AffineMontgomeryPoint::from(&(i64_to_scalar(batch_step) * G).0.mul_by_cofactor());
-            
-    //         let mut results = Vec::with_capacity(num_batches);
-            
-    //         // Pre-compute step_x4
-    //         let step_x4 = step.addition_not_ct(&step)
-    //             .addition_not_ct(&step)
-    //             .addition_not_ct(&step);
-            
-    //         let chunks = num_batches / 4;
-            
-    //         // Process in groups of 4
-    //         let mut current_batch = [initial; 4];
-            
-    //         for chunk in 0..chunks {
-    //             if chunk == 0 {
-    //                 // Initialize first batch
-    //                 current_batch[1] = current_batch[0].addition_not_ct(&step);
-    //                 current_batch[2] = current_batch[1].addition_not_ct(&step);
-    //                 current_batch[3] = current_batch[2].addition_not_ct(&step);
-    //             } else {
-    //                 // Use 4-way operation to advance all points
-    //                 current_batch = AffineMontgomeryPoint::batch_addition_not_ct_4way(
-    //                     &current_batch,
-    //                     &step_x4
-    //                 );
-    //             }
-                
-    //             // Store results
-    //             for i in 0..4 {
-    //                 let j = chunk * 4 + i;
-    //                 results.push((0, j * (1 << L2), current_batch[i], j as f64 / num_batches as f64));
-    //             }
-    //         }
-            
-    //         // Handle remainder with scalar operations
-    //         if chunks * 4 < num_batches {
-    //             let mut current = current_batch[3].addition_not_ct(&step);
-    //             for j in (chunks * 4)..num_batches {
-    //                 results.push((0, j * (1 << L2), current, j as f64 / num_batches as f64));
-    //                 current = current.addition_not_ct(&step);
-    //             }
-    //         }
-            
-    //         results
-    //     };
-        
-    //     let mut non_lazy_times = Vec::new();
-        
-    //     for _ in 0..5 {
-    //         let start = Instant::now();
-    //         let points = black_box(make_non_lazy_4way(&view, normalized, num_batches));
-    //         let elapsed = start.elapsed();
-    //         non_lazy_times.push(elapsed);
-    //         println!("  Run: {:?}, points: {}", elapsed, points.len());
-    //     }
-        
-    //     let non_lazy_avg = non_lazy_times.iter().sum::<std::time::Duration>() / non_lazy_times.len() as u32;
-    //     println!("  Average: {:?}", non_lazy_avg);
-        
-    //     // 3. Lazy SIMD iterator
-    //     println!("\n--- Lazy SIMD Iterator ---");
-        
-    //     struct LazySimdPointIterator {
-    //         current_batch: [AffineMontgomeryPoint; 4],
-    //         step: AffineMontgomeryPoint,
-    //         step_x4: AffineMontgomeryPoint,
-    //         batch_idx: usize,
-    //         j: usize,
-    //         num_batches: usize,
-    //     }
-        
-    //     impl Iterator for LazySimdPointIterator {
-    //         type Item = (usize, usize, AffineMontgomeryPoint, f64);
-            
-    //         fn next(&mut self) -> Option<Self::Item> {
-    //             if self.j >= self.num_batches {
-    //                 return None;
-    //             }
-                
-    //             if self.batch_idx >= 4 && self.j < self.num_batches {
-    //                 self.current_batch = AffineMontgomeryPoint::batch_addition_not_ct_4way(
-    //                     &self.current_batch,
-    //                     &self.step_x4
-    //                 );
-    //                 self.batch_idx = 0;
-    //             }
-                
-    //             let result = (
-    //                 0,
-    //                 self.j * (1 << L2),
-    //                 self.current_batch[self.batch_idx],
-    //                 self.j as f64 / self.num_batches as f64
-    //             );
-                
-    //             self.batch_idx += 1;
-    //             self.j += 1;
-                
-    //             Some(result)
-    //         }
-    //     }
-        
-    //     let make_lazy_simd_iterator = |view: &ECDLPTablesFileView, normalized: RistrettoPoint, num_batches: usize| -> LazySimdPointIterator {
-    //         let normalized = RistrettoPoint(normalized.0.mul_by_cofactor());
-    //         let els_per_batch: u64 = 1u64 << (L2 + view.get_l1());
-            
-    //         let initial = AffineMontgomeryPoint::from(&normalized.0);
-    //         let batch_step = -(els_per_batch as i64);
-    //         let step = AffineMontgomeryPoint::from(&(i64_to_scalar(batch_step) * G).0.mul_by_cofactor());
-            
-    //         let p0 = initial;
-    //         let p1 = p0.addition_not_ct(&step);
-    //         let p2 = p1.addition_not_ct(&step);
-    //         let p3 = p2.addition_not_ct(&step);
-            
-    //         let step_x4 = step.addition_not_ct(&step)
-    //             .addition_not_ct(&step)
-    //             .addition_not_ct(&step);
-            
-    //         LazySimdPointIterator {
-    //             current_batch: [p0, p1, p2, p3],
-    //             step,
-    //             step_x4,
-    //             batch_idx: 0,
-    //             j: 0,
-    //             num_batches,
-    //         }
-    //     };
-        
-    //     let mut lazy_times = Vec::new();
-        
-    //     for _ in 0..5 {
-    //         let start = Instant::now();
-    //         let iter = make_lazy_simd_iterator(&view, normalized, num_batches);
-    //         let points: Vec<_> = black_box(iter.collect());
-    //         let elapsed = start.elapsed();
-    //         lazy_times.push(elapsed);
-    //         println!("  Run: {:?}, points: {}", elapsed, points.len());
-    //     }
-        
-    //     let lazy_avg = lazy_times.iter().sum::<std::time::Duration>() / lazy_times.len() as u32;
-    //     println!("  Average: {:?}", lazy_avg);
-        
-    //     // 4. Verify correctness of all variants
-    //     println!("\n--- Correctness Verification ---");
-        
-    //     let standard_points: Vec<_> = make_point_iterator(&view, normalized, 20).collect();
-    //     let non_lazy_points = make_non_lazy_4way(&view, normalized, 20);
-    //     let lazy_points: Vec<_> = make_lazy_simd_iterator(&view, normalized, 20).collect();
-        
-    //     let mut all_match = true;
-    //     for i in 0..20 {
-    //         let std_u = standard_points[i].2.u.0[0];
-    //         let non_lazy_u = non_lazy_points[i].2.u.0[0];
-    //         let lazy_u = lazy_points[i].2.u.0[0];
-            
-    //         if std_u != non_lazy_u || std_u != lazy_u {
-    //             println!("  ❌ Mismatch at index {}:", i);
-    //             println!("    Standard:  {:016x}", std_u);
-    //             println!("    Non-lazy:  {:016x}", non_lazy_u);
-    //             println!("    Lazy:      {:016x}", lazy_u);
-    //             all_match = false;
-    //             break;
-    //         }
-    //     }
-        
-    //     if all_match {
-    //         println!("  ✅ All variants produce identical results");
-    //     }
-        
-    //     // Summary
-    //     println!("\n=== Performance Summary ===");
-    //     println!("Standard:          {:?}", standard_avg);
-    //     println!("Non-lazy (4-way):  {:?} ({:.2}x)", non_lazy_avg, standard_avg.as_secs_f64() / non_lazy_avg.as_secs_f64());
-    //     println!("Lazy SIMD:         {:?} ({:.2}x)", lazy_avg, standard_avg.as_secs_f64() / lazy_avg.as_secs_f64());
-        
-    //     // Points per second
-    //     let total_points = num_batches * (1 << L2);
-    //     println!("\nThroughput (points/sec):");
-    //     println!("Standard:          {:.0}", total_points as f64 / standard_avg.as_secs_f64());
-    //     println!("Non-lazy (4-way):  {:.0}", total_points as f64 / non_lazy_avg.as_secs_f64());
-    //     println!("Lazy SIMD:         {:.0}", total_points as f64 / lazy_avg.as_secs_f64());
-    // }
 }

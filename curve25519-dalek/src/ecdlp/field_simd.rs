@@ -1,19 +1,17 @@
 use cfg_if::cfg_if;
-#[cfg(feature = "simd")]
+
 cfg_if! {
-  if #[cfg(curve25519_dalek_bits = "32")] {
-      #[allow(unused_imports)]
-      use wide::{u32x8, u32x4, u32x2};
-  } else {
-      #[allow(unused_imports)]
-      use wide::{u64x4};
-  }
+    if #[cfg(curve25519_dalek_bits = "32")] {
+        use crate::ecdlp::simd_types::{U32x8 as u32x8, U32x4 as u32x4, U32x2 as u32x2};
+    } else {
+        use crate::ecdlp::simd_types::{U64x4 as u64x4};
+    }
 }
 
 use crate::field::FieldElement;
 
 impl FieldElement {
-    #[inline]
+    #[inline(always)]
     pub(crate) fn batch_subtract_4way(_batch: &[Self; 4], _target: &Self) -> [Self; 4] {
         cfg_if! {
             if #[cfg(curve25519_dalek_bits = "64")] {
@@ -23,7 +21,7 @@ impl FieldElement {
                 const OFFSET_1_4_VEC: u64x4 = u64x4::new([36028797018963952u64; 4]);
                     
                 for limb_idx in 0..5 {
-                    let batch_limbs = u64x4::from([
+                    let batch_limbs = u64x4::from_array([
                         _batch[0].0[limb_idx],
                         _batch[1].0[limb_idx],
                         _batch[2].0[limb_idx],
@@ -104,7 +102,7 @@ pub(crate) fn batch_subtract_4way_vec(_batch: &[Self; 4], _targets: &[Self; 4]) 
             const OFFSET_1_4_VEC: u64x4 = u64x4::new([36028797018963952u64; 4]);
                 
             for limb_idx in 0..5 {
-                let batch_limbs = u64x4::from([
+                let batch_limbs = u64x4::from_array([
                     _batch[0].0[limb_idx],
                     _batch[1].0[limb_idx],
                     _batch[2].0[limb_idx],
@@ -112,7 +110,7 @@ pub(crate) fn batch_subtract_4way_vec(_batch: &[Self; 4], _targets: &[Self; 4]) 
                 ]);
                 
                 // Load 4 different target limbs instead of splatting one
-                let target_limbs = u64x4::from([
+                let target_limbs = u64x4::from_array([
                     _targets[0].0[limb_idx],
                     _targets[1].0[limb_idx],
                     _targets[2].0[limb_idx],
@@ -196,7 +194,7 @@ pub(crate) fn batch_subtract_4way_vec(_batch: &[Self; 4], _targets: &[Self; 4]) 
                 let mut results = [Self::ZERO; 4];
                 
                 for limb_idx in 0..5 {
-                    let batch_limbs = u64x4::from([
+                    let batch_limbs = u64x4::from_array([
                         _batch[0].0[limb_idx],
                         _batch[1].0[limb_idx],
                         _batch[2].0[limb_idx],
@@ -256,14 +254,14 @@ pub(crate) fn batch_subtract_4way_vec(_batch: &[Self; 4], _targets: &[Self; 4]) 
                 let mut results = [Self::ZERO; 4];
                 
                 for limb_idx in 0..5 {
-                    let a_limbs = u64x4::from([
+                    let a_limbs = u64x4::from_array([
                         _a[0].0[limb_idx],
                         _a[1].0[limb_idx],
                         _a[2].0[limb_idx],
                         _a[3].0[limb_idx],
                     ]);
                     
-                    let b_limbs = u64x4::from([
+                    let b_limbs = u64x4::from_array([
                         _b[0].0[limb_idx],
                         _b[1].0[limb_idx],
                         _b[2].0[limb_idx],

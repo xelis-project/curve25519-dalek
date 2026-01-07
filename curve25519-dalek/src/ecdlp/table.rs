@@ -150,7 +150,7 @@ impl CuckooT1HashMapView<'_> {
         let mut results = [(false, 0u64); 4];
         let cuckoo_len = self.cuckoo_len as u32;
 
-        use wide::u32x4;
+        use crate::ecdlp::simd_types::u32x4;
         let p2_mask = u32x4::splat(cuckoo_len - 1);
         
         // Process each cuckoo position
@@ -226,7 +226,7 @@ impl CuckooT1HashMapView<'_> {
         let mut results = [(false, 0u64); 8];
         let cuckoo_len = self.cuckoo_len as u32;
 
-        use wide::u32x8;
+        use crate::ecdlp::simd_types::u32x8;
         let p2_mask = u32x8::splat(cuckoo_len - 1);
         
         // Process each cuckoo position
