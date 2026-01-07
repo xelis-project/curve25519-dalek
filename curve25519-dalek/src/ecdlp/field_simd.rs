@@ -1,467 +1,245 @@
-use cfg_if::cfg_if;
+use crate::field::FieldElement;
+use crate::backend::simd::SimdBackend;
+use crate::ecdlp::simd_types::{U64x4 as u64x4, U32x4 as u32x4, U32x8 as u32x8};
 
-cfg_if! {
-    if #[cfg(curve25519_dalek_bits = "32")] {
-        use crate::ecdlp::simd_types::{U32x8 as u32x8, U32x4 as u32x4, U32x2 as u32x2};
-    } else {
-        use crate::ecdlp::simd_types::{U64x4 as u64x4};
+// Generic 4-way batch subtraction
+#[inline(always)]
+fn batch_subtract_4way_impl<B: SimdBackend>(
+    batch: &[FieldElement; 4],
+    target: &FieldElement,
+) -> [FieldElement; 4] {
+    let mut results = [FieldElement::ZERO; 4];
+
+    for limb_idx in 0..B::NUM_LIMBS {
+        let batch_limbs = B::gather_limb_4(batch, limb_idx);
+        let target_limb = B::splat_limb(target, limb_idx);
+        let offset = B::offset_for_limb(limb_idx);
+
+        let diff = batch_limbs + offset - target_limb;
+        let diff_array = B::to_limb_array_4(diff);
+
+        for i in 0..4 {
+            results[i].0[limb_idx] = diff_array[i] as _;
+        }
     }
+
+    [
+        &results[0] - &FieldElement::ZERO,
+        &results[1] - &FieldElement::ZERO,
+        &results[2] - &FieldElement::ZERO,
+        &results[3] - &FieldElement::ZERO,
+    ]
 }
 
-use crate::field::FieldElement;
+// Generic 4-way batch subtraction with vectorized targets
+#[inline(always)]
+fn batch_subtract_4way_vec_impl<B: SimdBackend>(
+    batch: &[FieldElement; 4],
+    targets: &[FieldElement; 4],
+) -> [FieldElement; 4] {
+    let mut results = [FieldElement::ZERO; 4];
+
+    for limb_idx in 0..B::NUM_LIMBS {
+        let batch_limbs = B::gather_limb_4(batch, limb_idx);
+        let target_limbs = B::gather_limb_4(targets, limb_idx);
+        let offset = B::offset_for_limb(limb_idx);
+
+        let diff = batch_limbs + offset - target_limbs;
+        let diff_array = B::to_limb_array_4(diff);
+
+        for i in 0..4 {
+            results[i].0[limb_idx] = diff_array[i] as _;
+        }
+    }
+
+    [
+        &results[0] - &FieldElement::ZERO,
+        &results[1] - &FieldElement::ZERO,
+        &results[2] - &FieldElement::ZERO,
+        &results[3] - &FieldElement::ZERO,
+    ]
+}
+
+// Generic 8-way batch subtraction
+#[inline(always)]
+fn batch_subtract_8way_impl<B: SimdBackend>(
+    batch: &[FieldElement; 8],
+    target: &FieldElement,
+) -> [FieldElement; 8] {
+    let mut results = [FieldElement::ZERO; 8];
+
+    for limb_idx in 0..B::NUM_LIMBS {
+        let batch_limbs = B::gather_limb_8(batch, limb_idx);
+        let target_limb = B::splat_limb(target, limb_idx);
+        let offset = B::offset_for_limb(limb_idx);
+
+        let diff = batch_limbs + offset - target_limb;
+        let diff_array = B::to_limb_array_8(diff);
+
+        for i in 0..8 {
+            results[i].0[limb_idx] = diff_array[i] as _;
+        }
+    }
+
+    results.map(|r| &r - &FieldElement::ZERO)
+}
+
+// Generic 4-way batch addition
+#[inline(always)]
+fn batch_add_4way_impl<B: SimdBackend>(
+    batch: &[FieldElement; 4],
+    target: &FieldElement,
+) -> [FieldElement; 4] {
+    let mut results = [FieldElement::ZERO; 4];
+
+    for limb_idx in 0..B::NUM_LIMBS {
+        let batch_limbs = B::gather_limb_4(batch, limb_idx);
+        let target_limb = B::splat_limb(target, limb_idx);
+
+        let sum = batch_limbs + target_limb;
+        let sum_array = B::to_limb_array_4(sum);
+
+        for i in 0..4 {
+            results[i].0[limb_idx] = sum_array[i] as _;
+        }
+    }
+
+    [
+        &results[0] + &FieldElement::ZERO,
+        &results[1] + &FieldElement::ZERO,
+        &results[2] + &FieldElement::ZERO,
+        &results[3] + &FieldElement::ZERO,
+    ]
+}
+
+// Generic 8-way batch addition
+#[inline(always)]
+fn batch_add_8way_impl<B: SimdBackend>(
+    batch: &[FieldElement; 8],
+    target: &FieldElement,
+) -> [FieldElement; 8] {
+    let mut results = [FieldElement::ZERO; 8];
+
+    for limb_idx in 0..B::NUM_LIMBS {
+        let batch_limbs = B::gather_limb_8(batch, limb_idx);
+        let target_limb = B::splat_limb(target, limb_idx);
+
+        let sum = batch_limbs + target_limb;
+        let sum_array = B::to_limb_array_8(sum);
+
+        for i in 0..8 {
+            results[i].0[limb_idx] = sum_array[i] as _;
+        }
+    }
+
+    results.map(|r| &r + &FieldElement::ZERO)
+}
+
+// Generic 4-way vector addition
+#[inline(always)]
+fn batch_vecadd_4way_impl<B: SimdBackend>(
+    a: &[FieldElement; 4],
+    b: &[FieldElement; 4],
+) -> [FieldElement; 4] {
+    let mut results = [FieldElement::ZERO; 4];
+
+    for limb_idx in 0..B::NUM_LIMBS {
+        let a_limbs = B::gather_limb_4(a, limb_idx);
+        let b_limbs = B::gather_limb_4(b, limb_idx);
+
+        let sum = a_limbs + b_limbs;
+        let sum_array = B::to_limb_array_4(sum);
+
+        for i in 0..4 {
+            results[i].0[limb_idx] = sum_array[i] as _;
+        }
+    }
+
+    results.map(|r| &r + &FieldElement::ZERO)
+}
+
+// Generic 8-way vector addition
+#[inline(always)]
+fn batch_vecadd_8way_impl<B: SimdBackend>(
+    a: &[FieldElement; 8],
+    b: &[FieldElement; 8],
+) -> [FieldElement; 8] {
+    let mut results = [FieldElement::ZERO; 8];
+
+    for limb_idx in 0..B::NUM_LIMBS {
+        let a_limbs = B::gather_limb_8(a, limb_idx);
+        let b_limbs = B::gather_limb_8(b, limb_idx);
+
+        let sum = a_limbs + b_limbs;
+        let sum_array = B::to_limb_array_8(sum);
+
+        for i in 0..8 {
+            results[i].0[limb_idx] = sum_array[i] as _;
+        }
+    }
+
+    results.map(|r| &r + &FieldElement::ZERO)
+}
 
 impl FieldElement {
     #[inline(always)]
-    pub(crate) fn batch_subtract_4way(_batch: &[Self; 4], _target: &Self) -> [Self; 4] {
-        cfg_if! {
-            if #[cfg(curve25519_dalek_bits = "64")] {
-                let mut results = [Self::ZERO; 4];
-                
-                const OFFSET_0_VEC: u64x4 = u64x4::new([36028797018963664u64; 4]);
-                const OFFSET_1_4_VEC: u64x4 = u64x4::new([36028797018963952u64; 4]);
-                    
-                for limb_idx in 0..5 {
-                    let batch_limbs = u64x4::from_array([
-                        _batch[0].0[limb_idx],
-                        _batch[1].0[limb_idx],
-                        _batch[2].0[limb_idx],
-                        _batch[3].0[limb_idx],
-                    ]);
-                    
-                    let target_limb = u64x4::splat(_target.0[limb_idx]);
-                    let offset = if limb_idx == 0 {
-                        OFFSET_0_VEC
-                    } else {
-                        OFFSET_1_4_VEC
-                    };
-                    
-                    let diff = batch_limbs + offset - target_limb;
-                    let diff_array = diff.to_array();
-                    
-                    for i in 0..4 {
-                        results[i].0[limb_idx] = diff_array[i];
-                    }
-                }
-                
-                [
-                    &results[0] - &Self::ZERO,
-                    &results[1] - &Self::ZERO,
-                    &results[2] - &Self::ZERO,
-                    &results[3] - &Self::ZERO,
-                ]
-            } else {
-                const OFFSET_EVEN: u32x4 = u32x4::new([(0x3ffffff << 4); 4]);
-                const OFFSET_ODD: u32x4 = u32x4::new([(0x1ffffff << 4); 4]);
-                const OFFSET_FIRST: u32x4 = u32x4::new([(0x3ffffed << 4); 4]);
-                
-                let mut results = [Self::ZERO; 4];
-                
-                for limb_idx in 0..10 {
-                    let batch_limbs = u32x4::from([
-                        _batch[0].0[limb_idx],
-                        _batch[1].0[limb_idx],
-                        _batch[2].0[limb_idx],
-                        _batch[3].0[limb_idx],
-                    ]);
-                    
-                    let target_limb = u32x4::splat(_target.0[limb_idx]);
-                    
-                    let offset = if limb_idx == 0 {
-                        OFFSET_FIRST
-                    } else if limb_idx % 2 == 0 {
-                        OFFSET_EVEN
-                    } else {
-                        OFFSET_ODD
-                    };
-                    
-                    let diff = batch_limbs + offset - target_limb;
-                    let diff_array = diff.to_array();
-                    
-                    for i in 0..4 {
-                        results[i].0[limb_idx] = diff_array[i];
-                    }
-                }
-                
-                [
-                    &results[0] - &Self::ZERO,
-                    &results[1] - &Self::ZERO,
-                    &results[2] - &Self::ZERO,
-                    &results[3] - &Self::ZERO,
-                ]
-            }
-        }
-    }
-
-#[inline]
-pub(crate) fn batch_subtract_4way_vec(_batch: &[Self; 4], _targets: &[Self; 4]) -> [Self; 4] {
-    cfg_if! {
-        if #[cfg(curve25519_dalek_bits = "64")] {
-            let mut results = [Self::ZERO; 4];
-            
-            const OFFSET_0_VEC: u64x4 = u64x4::new([36028797018963664u64; 4]);
-            const OFFSET_1_4_VEC: u64x4 = u64x4::new([36028797018963952u64; 4]);
-                
-            for limb_idx in 0..5 {
-                let batch_limbs = u64x4::from_array([
-                    _batch[0].0[limb_idx],
-                    _batch[1].0[limb_idx],
-                    _batch[2].0[limb_idx],
-                    _batch[3].0[limb_idx],
-                ]);
-                
-                // Load 4 different target limbs instead of splatting one
-                let target_limbs = u64x4::from_array([
-                    _targets[0].0[limb_idx],
-                    _targets[1].0[limb_idx],
-                    _targets[2].0[limb_idx],
-                    _targets[3].0[limb_idx],
-                ]);
-                
-                let offset = if limb_idx == 0 {
-                    OFFSET_0_VEC
-                } else {
-                    OFFSET_1_4_VEC
-                };
-                
-                let diff = batch_limbs + offset - target_limbs;
-                let diff_array = diff.to_array();
-                
-                for i in 0..4 {
-                    results[i].0[limb_idx] = diff_array[i];
-                }
-            }
-            
-            [
-                &results[0] - &Self::ZERO,
-                &results[1] - &Self::ZERO,
-                &results[2] - &Self::ZERO,
-                &results[3] - &Self::ZERO,
-            ]
-        } else {
-            const OFFSET_EVEN: u32x4 = u32x4::new([(0x3ffffff << 4); 4]);
-            const OFFSET_ODD: u32x4 = u32x4::new([(0x1ffffff << 4); 4]);
-            const OFFSET_FIRST: u32x4 = u32x4::new([(0x3ffffed << 4); 4]);
-            
-            let mut results = [Self::ZERO; 4];
-            
-            for limb_idx in 0..10 {
-                let batch_limbs = u32x4::from([
-                    _batch[0].0[limb_idx],
-                    _batch[1].0[limb_idx],
-                    _batch[2].0[limb_idx],
-                    _batch[3].0[limb_idx],
-                ]);
-                
-                // Load 4 different target limbs instead of splatting one
-                let target_limbs = u32x4::from([
-                    _targets[0].0[limb_idx],
-                    _targets[1].0[limb_idx],
-                    _targets[2].0[limb_idx],
-                    _targets[3].0[limb_idx],
-                ]);
-                
-                let offset = if limb_idx == 0 {
-                    OFFSET_FIRST
-                } else if limb_idx % 2 == 0 {
-                    OFFSET_EVEN
-                } else {
-                    OFFSET_ODD
-                };
-                
-                let diff = batch_limbs + offset - target_limbs;
-                let diff_array = diff.to_array();
-                
-                for i in 0..4 {
-                    results[i].0[limb_idx] = diff_array[i];
-                }
-            }
-            
-            [
-                &results[0] - &Self::ZERO,
-                &results[1] - &Self::ZERO,
-                &results[2] - &Self::ZERO,
-                &results[3] - &Self::ZERO,
-            ]
-        }
-    }
-}
-
-
-    #[inline]
-    pub(crate) fn batch_add_4way(_batch: &[Self; 4], _target: &Self) -> [Self; 4] {
-        cfg_if! {
-            if #[cfg(curve25519_dalek_bits = "64")] {
-                let mut results = [Self::ZERO; 4];
-                
-                for limb_idx in 0..5 {
-                    let batch_limbs = u64x4::from_array([
-                        _batch[0].0[limb_idx],
-                        _batch[1].0[limb_idx],
-                        _batch[2].0[limb_idx],
-                        _batch[3].0[limb_idx],
-                    ]);
-                    
-                    let target_limb = u64x4::splat(_target.0[limb_idx]);
-                    
-                    let sum = batch_limbs + target_limb;
-                    let sum_array = sum.to_array();
-                    
-                    for i in 0..4 {
-                        results[i].0[limb_idx] = sum_array[i];
-                    }
-                }
-                
-                [
-                    &results[0] + &Self::ZERO,
-                    &results[1] + &Self::ZERO,
-                    &results[2] + &Self::ZERO,
-                    &results[3] + &Self::ZERO,
-                ]
-            } else {
-                let mut results = [Self::ZERO; 4];
-                
-                for limb_idx in 0..10 {
-                    let batch_limbs = u32x4::from([
-                        _batch[0].0[limb_idx],
-                        _batch[1].0[limb_idx],
-                        _batch[2].0[limb_idx],
-                        _batch[3].0[limb_idx],
-                    ]);
-                    
-                    let target_limb = u32x4::splat(_target.0[limb_idx]);
-                    
-                    let sum = batch_limbs + target_limb;
-                    let sum_array = sum.to_array();
-                    
-                    for i in 0..4 {
-                        results[i].0[limb_idx] = sum_array[i];
-                    }
-                }
-                
-                [
-                    &results[0] + &Self::ZERO,
-                    &results[1] + &Self::ZERO,
-                    &results[2] + &Self::ZERO,
-                    &results[3] + &Self::ZERO,
-                ]
-            }
-        }
-    }
-    #[inline]
-    pub(crate) fn batch_vecadd_4way(_a: &[Self; 4], _b: &[Self; 4]) -> [Self; 4] {
-        cfg_if! {
-            if #[cfg(curve25519_dalek_bits = "64")] {
-                let mut results = [Self::ZERO; 4];
-                
-                for limb_idx in 0..5 {
-                    let a_limbs = u64x4::from_array([
-                        _a[0].0[limb_idx],
-                        _a[1].0[limb_idx],
-                        _a[2].0[limb_idx],
-                        _a[3].0[limb_idx],
-                    ]);
-                    
-                    let b_limbs = u64x4::from_array([
-                        _b[0].0[limb_idx],
-                        _b[1].0[limb_idx],
-                        _b[2].0[limb_idx],
-                        _b[3].0[limb_idx],
-                    ]);
-                    
-                    let sum = a_limbs + b_limbs;
-                    let sum_array = sum.to_array();
-                    
-                    for i in 0..4 {
-                        results[i].0[limb_idx] = sum_array[i];
-                    }
-                }
-                
-                [
-                    &results[0] + &Self::ZERO,
-                    &results[1] + &Self::ZERO,
-                    &results[2] + &Self::ZERO,
-                    &results[3] + &Self::ZERO,
-                ]
-            } else {
-                let mut results = [Self::ZERO; 4];
-                
-                for limb_idx in 0..10 {
-                    let a_limbs = u32x4::from([
-                        _a[0].0[limb_idx],
-                        _a[1].0[limb_idx],
-                        _a[2].0[limb_idx],
-                        _a[3].0[limb_idx],
-                    ]);
-                    
-                    let b_limbs = u32x4::from([
-                        _b[0].0[limb_idx],
-                        _b[1].0[limb_idx],
-                        _b[2].0[limb_idx],
-                        _b[3].0[limb_idx],
-                    ]);
-                    
-                    let sum = a_limbs + b_limbs;
-                    let sum_array = sum.to_array();
-                    
-                    for i in 0..4 {
-                        results[i].0[limb_idx] = sum_array[i];
-                    }
-                }
-                
-                [
-                    &results[0] + &Self::ZERO,
-                    &results[1] + &Self::ZERO,
-                    &results[2] + &Self::ZERO,
-                    &results[3] + &Self::ZERO,
-                ]
-            }
-        }
-    }
-    
-    #[inline]
-    pub(crate) fn batch_subtract_8way(_batch: &[Self; 8], _target: &Self) -> [Self; 8] {
-        cfg_if! {
-            if #[cfg(curve25519_dalek_bits = "32")] {
-                let mut results = [Self::ZERO; 8];
-                
-                for limb_idx in 0..10 {
-                    let batch_limbs = u32x8::from([
-                        _batch[0].0[limb_idx],
-                        _batch[1].0[limb_idx],
-                        _batch[2].0[limb_idx],
-                        _batch[3].0[limb_idx],
-                        _batch[4].0[limb_idx],
-                        _batch[5].0[limb_idx],
-                        _batch[6].0[limb_idx],
-                        _batch[7].0[limb_idx],
-                    ]);
-                    
-                    let target_limb = u32x8::splat(_target.0[limb_idx]);
-                    
-                    let offset = if limb_idx % 2 == 0 {
-                        u32x8::splat(0x3ffffff << 4)
-                    } else {
-                        u32x8::splat(0x1ffffff << 4)
-                    };
-                    
-                    let offset = if limb_idx == 0 {
-                        u32x8::splat(0x3ffffed << 4)
-                    } else {
-                        offset
-                    };
-                    
-                    let diff = batch_limbs + offset - target_limb;
-                    let diff_array = diff.to_array();
-                    
-                    for i in 0..8 {
-                        results[i].0[limb_idx] = diff_array[i];
-                    }
-                }
-                
-                results.map(|r| &r - &Self::ZERO)
-            } else {
-                unimplemented!("8-way not supported for 64-bit field elements")
-            }
-        }
-    }
-    #[inline]
-    pub(crate) fn batch_add_8way(_batch: &[Self; 8], _target: &Self) -> [Self; 8] {
-        cfg_if! {
-            if #[cfg(curve25519_dalek_bits = "32")] {
-                let mut results = [Self::ZERO; 8];
-                
-                for limb_idx in 0..10 {
-                    let batch_limbs = u32x8::from([
-                        _batch[0].0[limb_idx],
-                        _batch[1].0[limb_idx],
-                        _batch[2].0[limb_idx],
-                        _batch[3].0[limb_idx],
-                        _batch[4].0[limb_idx],
-                        _batch[5].0[limb_idx],
-                        _batch[6].0[limb_idx],
-                        _batch[7].0[limb_idx],
-                    ]);
-                    
-                    let target_limb = u32x8::splat(_target.0[limb_idx]);
-                    
-                    let sum = batch_limbs + target_limb;
-                    let sum_array = sum.to_array();
-                    
-                    for i in 0..8 {
-                        results[i].0[limb_idx] = sum_array[i];
-                    }
-                }
-                
-                results.map(|r| &r + &Self::ZERO)
-            } else {
-                unimplemented!("8-way not supported for 64-bit field elements")
-            }
-        }
-    }
-    #[inline]
-    pub(crate) fn batch_vecadd_8way(_a: &[Self; 8], _b: &[Self; 8]) -> [Self; 8] {
-        cfg_if! {
-            if #[cfg(curve25519_dalek_bits = "32")] {
-                let mut results = [Self::ZERO; 8];
-                
-                for limb_idx in 0..10 {
-                    let a_limbs = u32x8::from([
-                        _a[0].0[limb_idx],
-                        _a[1].0[limb_idx],
-                        _a[2].0[limb_idx],
-                        _a[3].0[limb_idx],
-                        _a[4].0[limb_idx],
-                        _a[5].0[limb_idx],
-                        _a[6].0[limb_idx],
-                        _a[7].0[limb_idx],
-                    ]);
-                    
-                    let b_limbs = u32x8::from([
-                        _b[0].0[limb_idx],
-                        _b[1].0[limb_idx],
-                        _b[2].0[limb_idx],
-                        _b[3].0[limb_idx],
-                        _b[4].0[limb_idx],
-                        _b[5].0[limb_idx],
-                        _b[6].0[limb_idx],
-                        _b[7].0[limb_idx],
-                    ]);
-                    
-                    let sum = a_limbs + b_limbs;
-                    let sum_array = sum.to_array();
-                    
-                    for i in 0..8 {
-                        results[i].0[limb_idx] = sum_array[i];
-                    }
-                }
-                
-                results.map(|r| &r + &Self::ZERO)
-            } else {
-                unimplemented!("8-way not supported for 64-bit field elements")
-            }
-        }
+    pub(crate) fn batch_subtract_4way(batch: &[Self; 4], target: &Self) -> [Self; 4] {
+        batch_subtract_4way_impl::<crate::backend::simd::DefaultBackend>(batch, target)
     }
 
     #[inline]
+    pub(crate) fn batch_subtract_4way_vec(batch: &[Self; 4], targets: &[Self; 4]) -> [Self; 4] {
+        batch_subtract_4way_vec_impl::<crate::backend::simd::DefaultBackend>(batch, targets)
+    }
+
+    #[inline]
+    pub(crate) fn batch_add_4way(batch: &[Self; 4], target: &Self) -> [Self; 4] {
+        batch_add_4way_impl::<crate::backend::simd::DefaultBackend>(batch, target)
+    }
+
+    #[inline]
+    pub(crate) fn batch_vecadd_4way(a: &[Self; 4], b: &[Self; 4]) -> [Self; 4] {
+        batch_vecadd_4way_impl::<crate::backend::simd::DefaultBackend>(a, b)
+    }
+
+    #[inline]
+    #[cfg(curve25519_dalek_bits = "32")]
+    pub(crate) fn batch_subtract_8way(batch: &[Self; 8], target: &Self) -> [Self; 8] {
+        batch_subtract_8way_impl::<crate::backend::simd::Backend8Way>(batch, target)
+    }
+    #[inline]
+    #[cfg(curve25519_dalek_bits = "32")]
+    pub(crate) fn batch_add_8way(batch: &[Self; 8], target: &Self) -> [Self; 8] {
+        batch_add_8way_impl::<crate::backend::simd::Backend8Way>(batch, target)
+    }
+    #[inline]
+    #[cfg(curve25519_dalek_bits = "32")]
+    pub(crate) fn batch_vecadd_8way(a: &[Self; 8], b: &[Self; 8]) -> [Self; 8] {
+        batch_vecadd_8way_impl::<crate::backend::simd::Backend8Way>(a, b)
+    }
+
+    #[inline]
+    #[cfg(curve25519_dalek_bits = "64")]
     pub(crate) fn batch_mul_4way(a: &[Self; 4], b: &[Self; 4]) -> [Self; 4] {
-        cfg_if! {
-            if #[cfg(curve25519_dalek_bits = "64")] {
-                Self::batch_mul_4way_64bit(a, b)
-            } else {
-                unimplemented!("32-bit SIMD multiplication not supported")
-            }
-        }
+        Self::batch_mul_4way_64bit(a, b)
     }
 
     #[inline]
+    #[cfg(curve25519_dalek_bits = "32")]
+    pub(crate) fn batch_mul_4way(_a: &[Self; 4], _b: &[Self; 4]) -> [Self; 4] {
+        unimplemented!("32-bit SIMD multiplication not supported")
+    }
+
+    #[inline]
+    #[cfg(curve25519_dalek_bits = "64")]
     pub(crate) fn batch_mul_4way_ct(a: &[Self; 4], b: &[Self; 4]) -> [Self; 4] {
-        cfg_if! {
-            if #[cfg(curve25519_dalek_bits = "64")] {
-                Self::batch_mul_4way_64bit_ct(a, b)
-            } else {
-                unimplemented!("32-bit SIMD multiplication not supported")
-            }
-        }
+        Self::batch_mul_4way_64bit_ct(a, b)
+    }
+
+    #[inline]
+    #[cfg(curve25519_dalek_bits = "32")]
+    pub(crate) fn batch_mul_4way_ct(_a: &[Self; 4], _b: &[Self; 4]) -> [Self; 4] {
+        unimplemented!("32-bit SIMD multiplication not supported")
     }
 
     #[cfg(curve25519_dalek_bits = "64")]
@@ -807,28 +585,30 @@ pub(crate) fn batch_subtract_4way_vec(_batch: &[Self; 4], _targets: &[Self; 4]) 
 
     /// Batch square 4 field elements simultaneously using SIMD
     #[inline]
+    #[cfg(curve25519_dalek_bits = "64")]
     pub(crate) fn batch_square_4way(a: &[Self; 4]) -> [Self; 4] {
-        cfg_if! {
-            if #[cfg(curve25519_dalek_bits = "64")] {
-                Self::batch_square_4way_64bit(a)
-            } else {
-                // 32-bit implementation would go here
-                unimplemented!("32-bit SIMD squaring not yet implemented")
-            }
-        }
+        Self::batch_square_4way_64bit(a)
+    }
+
+    /// Batch square 4 field elements simultaneously using SIMD (32-bit stub)
+    #[inline]
+    #[cfg(curve25519_dalek_bits = "32")]
+    pub(crate) fn batch_square_4way(_a: &[Self; 4]) -> [Self; 4] {
+        unimplemented!("32-bit SIMD squaring not yet implemented")
     }
 
     /// Constant-time batch square 4 field elements simultaneously using SIMD
     #[inline]
+    #[cfg(curve25519_dalek_bits = "64")]
     pub(crate) fn batch_square_4way_ct(a: &[Self; 4]) -> [Self; 4] {
-        cfg_if! {
-            if #[cfg(curve25519_dalek_bits = "64")] {
-                Self::batch_square_4way_64bit_ct(a)
-            } else {
-                // 32-bit implementation would go here
-                unimplemented!("32-bit SIMD squaring not yet implemented")
-            }
-        }
+        Self::batch_square_4way_64bit_ct(a)
+    }
+
+    /// Constant-time batch square 4 field elements simultaneously using SIMD (32-bit stub)
+    #[inline]
+    #[cfg(curve25519_dalek_bits = "32")]
+    pub(crate) fn batch_square_4way_ct(_a: &[Self; 4]) -> [Self; 4] {
+        unimplemented!("32-bit SIMD squaring not yet implemented")
     }
 
     #[cfg(curve25519_dalek_bits = "64")]

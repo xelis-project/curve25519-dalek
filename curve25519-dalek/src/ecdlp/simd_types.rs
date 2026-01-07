@@ -1424,6 +1424,11 @@ impl U32x4 {
     }
 
     #[inline(always)]
+    pub fn from_array(arr: [u32; 4]) -> Self {
+        Self(arr)
+    }
+
+    #[inline(always)]
     pub fn cmp_eq(self, other: Self) -> Self {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         #[target_feature(enable = "avx2")]
@@ -1467,6 +1472,110 @@ impl U32x4 {
                     if self.0[1] == other.0[1] { u32::MAX } else { 0 },
                     if self.0[2] == other.0[2] { u32::MAX } else { 0 },
                     if self.0[3] == other.0[3] { u32::MAX } else { 0 },
+                ])
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn cmp_lt(self, other: Self) -> Self {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        #[target_feature(enable = "sse2")]
+        #[inline]
+        unsafe fn cmp_lt_sse2(a: &U32x4, b: &U32x4) -> U32x4 {
+            #[cfg(target_arch = "x86_64")]
+            use std::arch::x86_64::*;
+            #[cfg(target_arch = "x86")]
+            use std::arch::x86::*;
+
+            let a_val = _mm_loadu_si128(a.0.as_ptr() as *const __m128i);
+            let b_val = _mm_loadu_si128(b.0.as_ptr() as *const __m128i);
+            // For unsigned comparison, we need to subtract 2^31 from both values
+            let sign_bit = _mm_set1_epi32(i32::MIN);
+            let a_flipped = _mm_xor_si128(a_val, sign_bit);
+            let b_flipped = _mm_xor_si128(b_val, sign_bit);
+            let r = _mm_cmplt_epi32(a_flipped, b_flipped);
+            let mut out = U32x4::ZERO;
+            _mm_storeu_si128(out.0.as_mut_ptr() as *mut __m128i, r);
+            out
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        #[target_feature(enable = "neon")]
+        #[inline]
+        unsafe fn cmp_lt_neon(a: &U32x4, b: &U32x4) -> U32x4 {
+            use std::arch::aarch64::*;
+
+            let a_val = vld1q_u32(a.0.as_ptr());
+            let b_val = vld1q_u32(b.0.as_ptr());
+            let r = vcltq_u32(a_val, b_val);
+            let mut out = U32x4::ZERO;
+            vst1q_u32(out.0.as_mut_ptr(), r);
+            out
+        }
+
+        cfg_if! {
+            if #[cfg(any(target_arch = "x86", target_arch = "x86_64"))] {
+                unsafe { cmp_lt_sse2(&self, &other) }
+            } else if #[cfg(target_arch = "aarch64")] {
+                unsafe { cmp_lt_neon(&self, &other) }
+            } else {
+                Self([
+                    if self.0[0] < other.0[0] { u32::MAX } else { 0 },
+                    if self.0[1] < other.0[1] { u32::MAX } else { 0 },
+                    if self.0[2] < other.0[2] { u32::MAX } else { 0 },
+                    if self.0[3] < other.0[3] { u32::MAX } else { 0 },
+                ])
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn blend(self, true_val: Self, false_val: Self) -> Self {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        #[target_feature(enable = "sse4.1")]
+        #[inline]
+        unsafe fn blend_sse41(mask: &U32x4, true_val: &U32x4, false_val: &U32x4) -> U32x4 {
+            #[cfg(target_arch = "x86_64")]
+            use std::arch::x86_64::*;
+            #[cfg(target_arch = "x86")]
+            use std::arch::x86::*;
+
+            let mask_val = _mm_loadu_si128(mask.0.as_ptr() as *const __m128i);
+            let true_val_vec = _mm_loadu_si128(true_val.0.as_ptr() as *const __m128i);
+            let false_val_vec = _mm_loadu_si128(false_val.0.as_ptr() as *const __m128i);
+            let r = _mm_blendv_epi8(false_val_vec, true_val_vec, mask_val);
+            let mut out = U32x4::ZERO;
+            _mm_storeu_si128(out.0.as_mut_ptr() as *mut __m128i, r);
+            out
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        #[target_feature(enable = "neon")]
+        #[inline]
+        unsafe fn blend_neon(mask: &U32x4, true_val: &U32x4, false_val: &U32x4) -> U32x4 {
+            use std::arch::aarch64::*;
+
+            let mask_val = vld1q_u32(mask.0.as_ptr());
+            let true_val_vec = vld1q_u32(true_val.0.as_ptr());
+            let false_val_vec = vld1q_u32(false_val.0.as_ptr());
+            let r = vbslq_u32(mask_val, true_val_vec, false_val_vec);
+            let mut out = U32x4::ZERO;
+            vst1q_u32(out.0.as_mut_ptr(), r);
+            out
+        }
+
+        cfg_if! {
+            if #[cfg(any(target_arch = "x86", target_arch = "x86_64"))] {
+                unsafe { blend_sse41(&self, &true_val, &false_val) }
+            } else if #[cfg(target_arch = "aarch64")] {
+                unsafe { blend_neon(&self, &true_val, &false_val) }
+            } else {
+                Self([
+                    if self.0[0] != 0 { true_val.0[0] } else { false_val.0[0] },
+                    if self.0[1] != 0 { true_val.0[1] } else { false_val.0[1] },
+                    if self.0[2] != 0 { true_val.0[2] } else { false_val.0[2] },
+                    if self.0[3] != 0 { true_val.0[3] } else { false_val.0[3] },
                 ])
             }
         }
@@ -1577,6 +1686,20 @@ impl std::ops::Sub for U32x4 {
     }
 }
 
+impl std::ops::Mul for U32x4 {
+    type Output = Self;
+    #[inline(always)]
+    fn mul(self, other: Self) -> Self {
+        // Use scalar multiplication - no efficient 32x32 SIMD multiply in SSE2
+        Self([
+            self.0[0].wrapping_mul(other.0[0]),
+            self.0[1].wrapping_mul(other.0[1]),
+            self.0[2].wrapping_mul(other.0[2]),
+            self.0[3].wrapping_mul(other.0[3]),
+        ])
+    }
+}
+
 impl std::ops::BitAnd for U32x4 {
     type Output = Self;
     #[inline(always)]
@@ -1665,6 +1788,11 @@ impl U32x8 {
     #[inline(always)]
     pub fn to_array(self) -> [u32; 8] {
         self.0
+    }
+
+    #[inline(always)]
+    pub fn from_array(arr: [u32; 8]) -> Self {
+        Self(arr)
     }
 
     #[inline(always)]
@@ -1758,6 +1886,127 @@ impl U32x8 {
     #[inline(always)]
     pub fn any_nonzero(self) -> bool {
         self.0.iter().any(|&x| x != 0)
+    }
+
+    #[inline(always)]
+    pub fn cmp_lt(self, other: Self) -> Self {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        #[target_feature(enable = "avx2")]
+        #[inline]
+        unsafe fn cmp_lt_avx2(a: &U32x8, b: &U32x8) -> U32x8 {
+            #[cfg(target_arch = "x86_64")]
+            use std::arch::x86_64::*;
+            #[cfg(target_arch = "x86")]
+            use std::arch::x86::*;
+
+            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+            // For unsigned comparison, subtract 2^31 from both values
+            let sign_bit = _mm256_set1_epi32(i32::MIN);
+            let a_flipped = _mm256_xor_si256(a_val, sign_bit);
+            let b_flipped = _mm256_xor_si256(b_val, sign_bit);
+            let r = _mm256_cmpgt_epi32(b_flipped, a_flipped);
+            let mut out = U32x8::ZERO;
+            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+            out
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        #[target_feature(enable = "neon")]
+        #[inline]
+        unsafe fn cmp_lt_neon(a: &U32x8, b: &U32x8) -> U32x8 {
+            use std::arch::aarch64::*;
+
+            let a0 = vld1q_u32(a.0.as_ptr());
+            let a1 = vld1q_u32(a.0.as_ptr().add(4));
+            let b0 = vld1q_u32(b.0.as_ptr());
+            let b1 = vld1q_u32(b.0.as_ptr().add(4));
+            let r0 = vcltq_u32(a0, b0);
+            let r1 = vcltq_u32(a1, b1);
+            let mut out = U32x8::ZERO;
+            vst1q_u32(out.0.as_mut_ptr(), r0);
+            vst1q_u32(out.0.as_mut_ptr().add(4), r1);
+            out
+        }
+
+        cfg_if! {
+            if #[cfg(any(target_arch = "x86", target_arch = "x86_64"))] {
+                unsafe { cmp_lt_avx2(&self, &other) }
+            } else if #[cfg(target_arch = "aarch64")] {
+                unsafe { cmp_lt_neon(&self, &other) }
+            } else {
+                Self([
+                    if self.0[0] < other.0[0] { u32::MAX } else { 0 },
+                    if self.0[1] < other.0[1] { u32::MAX } else { 0 },
+                    if self.0[2] < other.0[2] { u32::MAX } else { 0 },
+                    if self.0[3] < other.0[3] { u32::MAX } else { 0 },
+                    if self.0[4] < other.0[4] { u32::MAX } else { 0 },
+                    if self.0[5] < other.0[5] { u32::MAX } else { 0 },
+                    if self.0[6] < other.0[6] { u32::MAX } else { 0 },
+                    if self.0[7] < other.0[7] { u32::MAX } else { 0 },
+                ])
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn blend(self, true_val: Self, false_val: Self) -> Self {
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        #[target_feature(enable = "avx2")]
+        #[inline]
+        unsafe fn blend_avx2(mask: &U32x8, true_val: &U32x8, false_val: &U32x8) -> U32x8 {
+            #[cfg(target_arch = "x86_64")]
+            use std::arch::x86_64::*;
+            #[cfg(target_arch = "x86")]
+            use std::arch::x86::*;
+
+            let mask_val = _mm256_loadu_si256(mask.0.as_ptr() as *const __m256i);
+            let true_val_vec = _mm256_loadu_si256(true_val.0.as_ptr() as *const __m256i);
+            let false_val_vec = _mm256_loadu_si256(false_val.0.as_ptr() as *const __m256i);
+            let r = _mm256_blendv_epi8(false_val_vec, true_val_vec, mask_val);
+            let mut out = U32x8::ZERO;
+            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+            out
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        #[target_feature(enable = "neon")]
+        #[inline]
+        unsafe fn blend_neon(mask: &U32x8, true_val: &U32x8, false_val: &U32x8) -> U32x8 {
+            use std::arch::aarch64::*;
+
+            let mask0 = vld1q_u32(mask.0.as_ptr());
+            let mask1 = vld1q_u32(mask.0.as_ptr().add(4));
+            let true_val0 = vld1q_u32(true_val.0.as_ptr());
+            let true_val1 = vld1q_u32(true_val.0.as_ptr().add(4));
+            let false_val0 = vld1q_u32(false_val.0.as_ptr());
+            let false_val1 = vld1q_u32(false_val.0.as_ptr().add(4));
+            let r0 = vbslq_u32(mask0, true_val0, false_val0);
+            let r1 = vbslq_u32(mask1, true_val1, false_val1);
+            let mut out = U32x8::ZERO;
+            vst1q_u32(out.0.as_mut_ptr(), r0);
+            vst1q_u32(out.0.as_mut_ptr().add(4), r1);
+            out
+        }
+
+        cfg_if! {
+            if #[cfg(any(target_arch = "x86", target_arch = "x86_64"))] {
+                unsafe { blend_avx2(&self, &true_val, &false_val) }
+            } else if #[cfg(target_arch = "aarch64")] {
+                unsafe { blend_neon(&self, &true_val, &false_val) }
+            } else {
+                Self([
+                    if self.0[0] != 0 { true_val.0[0] } else { false_val.0[0] },
+                    if self.0[1] != 0 { true_val.0[1] } else { false_val.0[1] },
+                    if self.0[2] != 0 { true_val.0[2] } else { false_val.0[2] },
+                    if self.0[3] != 0 { true_val.0[3] } else { false_val.0[3] },
+                    if self.0[4] != 0 { true_val.0[4] } else { false_val.0[4] },
+                    if self.0[5] != 0 { true_val.0[5] } else { false_val.0[5] },
+                    if self.0[6] != 0 { true_val.0[6] } else { false_val.0[6] },
+                    if self.0[7] != 0 { true_val.0[7] } else { false_val.0[7] },
+                ])
+            }
+        }
     }
 }
 
@@ -1878,6 +2127,24 @@ impl std::ops::Sub for U32x8 {
                 ])
             }
         }
+    }
+}
+
+impl std::ops::Mul for U32x8 {
+    type Output = Self;
+    #[inline(always)]
+    fn mul(self, other: Self) -> Self {
+        // Use scalar multiplication - no efficient 32x32 SIMD multiply
+        Self([
+            self.0[0].wrapping_mul(other.0[0]),
+            self.0[1].wrapping_mul(other.0[1]),
+            self.0[2].wrapping_mul(other.0[2]),
+            self.0[3].wrapping_mul(other.0[3]),
+            self.0[4].wrapping_mul(other.0[4]),
+            self.0[5].wrapping_mul(other.0[5]),
+            self.0[6].wrapping_mul(other.0[6]),
+            self.0[7].wrapping_mul(other.0[7]),
+        ])
     }
 }
 

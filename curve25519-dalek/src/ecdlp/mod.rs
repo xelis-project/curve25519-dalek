@@ -87,7 +87,7 @@ mod ecdlp_notes {
     //! [fast-ecdlp-paper]: https://eprint.iacr.org/2022/1573
 }
 
-mod simd_types;
+pub(crate) mod simd_types;
 mod affine_montgomery;
 mod table;
 mod field_simd;
@@ -554,11 +554,19 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
     point: RistrettoPoint,
     args: ECDLPArguments<R>,
 ) -> Option<i64> {
-    use std::ops::ControlFlow;
-    use std::sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    };
+    // For 32-bit, use scalar implementation until 32-bit SIMD is properly implemented
+    #[cfg(curve25519_dalek_bits = "32")]
+    {
+        return par_decode_scalar(precomputed_tables, point, args);
+    }
+
+    #[cfg(curve25519_dalek_bits = "64")]
+    {
+        use std::ops::ControlFlow;
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
 
     let n_threads = args.n_threads.max(1);
 
@@ -693,6 +701,7 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
         }
         found
     })
+    } // end cfg(curve25519_dalek_bits = "64")
 }
 
 fn make_point_iterator_simd_batched(
@@ -1543,6 +1552,19 @@ fn i64_to_scalar(n: i64) -> Scalar {
         -&Scalar::from((-n) as u64)
     }
 }
+
+// Public API: choose SIMD or scalar based on platform
+// 64-bit uses SIMD, 32-bit uses scalar (for now)
+#[cfg(curve25519_dalek_bits = "64")]
+pub use par_decode as par_decode_default;
+
+#[cfg(curve25519_dalek_bits = "32")]
+pub use par_decode_scalar as par_decode_default;
+
+// Test-only flag to force 32-bit SIMD testing on 64-bit platforms
+// Usage: RUSTFLAGS='--cfg curve25519_dalek_bits="32" --cfg force_ecdlp_32bit_simd_test'
+#[cfg(all(test, curve25519_dalek_bits = "32", force_ecdlp_32bit_simd_test))]
+pub use par_decode as par_decode_32bit_simd_test;
 
 #[cfg(test)]
 mod tests {
