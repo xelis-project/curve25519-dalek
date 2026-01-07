@@ -420,6 +420,7 @@ fn make_point_iterator_simd(
     
     struct OptimizedIterator {
         current_batch: [AffineMontgomeryPoint; 4],
+        #[allow(dead_code)]
         step: AffineMontgomeryPoint,
         step_x4: AffineMontgomeryPoint,
         batch_idx: usize,
@@ -669,7 +670,6 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
                         chunk_args.pseudo_constant_time,
                         &end_flag,
                         progress_wrapper,
-                        t2_cache,
                         t2_cache_alpha,
                         &t2_u_values,
                         &t2_vs,
@@ -704,6 +704,7 @@ pub fn par_decode<R: ProgressReportFunction + Sync>(
     } // end cfg(curve25519_dalek_bits = "64")
 }
 
+#[allow(dead_code)]
 fn make_point_iterator_simd_batched(
     precomputed_tables: &ECDLPTablesFileView<'_>,
     normalized: RistrettoPoint,
@@ -832,21 +833,9 @@ pub fn par_decode_scalar<R: ProgressReportFunction + Sync>(
             let t2_cache = &t2_cache;
             let t2_cache_alpha = &t2_cache_alpha;
 
-            // NOTE: if `RistrettoPoint` isn’t `Copy`, use `let point = point.clone();`
             let point = point;
 
             handles.push(scope.spawn(move || -> Option<i64> {
-                // Per-thread derived values
-                let t2_u_values: [FieldElement; BATCH_SIZE] = {
-                    let mut u_values = [FieldElement::ZERO; BATCH_SIZE];
-                    for i in 0..BATCH_SIZE {
-                        u_values[i] = t2_cache[i].u;
-                    }
-                    u_values
-                };
-                let _t2_vs: [FieldElement; BATCH_SIZE] = t2_cache.map(|p| p.v.clone());
-                let _t2_vs_neg: [FieldElement; BATCH_SIZE] = t2_cache.map(|p| -&p.v);
-
                 for chunk_index in (thread_index..num_chunks).step_by(n_threads) {
                     if end_flag.load(Ordering::Relaxed) {
                         return None;
@@ -1082,6 +1071,7 @@ pub fn batch_field_add<const N: usize>(
 }
 
 #[inline(always)]
+#[allow(dead_code)]
 fn batch_field_mul_and_square<const N: usize>(
     output: &mut [FieldElement; N],
     a: &[FieldElement; N],
@@ -1089,7 +1079,7 @@ fn batch_field_mul_and_square<const N: usize>(
 ) {
     let mut pos = 0;
 
-    #[cfg(all(feature = "simd", curve25519_dalek_bits = "64"))]
+    #[cfg(curve25519_dalek_bits = "64")]
     {
         const CHUNK_SIZE: usize = 4;
         while pos + CHUNK_SIZE <= N {
@@ -1104,7 +1094,7 @@ fn batch_field_mul_and_square<const N: usize>(
         }
     }
 
-    #[cfg(all(feature = "simd", curve25519_dalek_bits = "32"))]
+    #[cfg(curve25519_dalek_bits = "32")]
     {
         const CHUNK_SIZE: usize = 8;
         while pos + CHUNK_SIZE <= N {
@@ -1128,9 +1118,8 @@ fn batch_field_mul_and_square<const N: usize>(
 
 /// Batch converts multiple i64 values to Scalar types using SIMD where possible
 pub fn batch_i64_to_scalar(inputs: &[i64], outputs: &mut [Scalar]) {
-    #[cfg(feature = "simd")]
     {
-        use crate::ecdlp::simd_types::{i64x4, CmpGt};
+        use crate::ecdlp::simd_types::{i64x4};
         
         assert_eq!(inputs.len(), outputs.len());
         let len = inputs.len();
@@ -1185,12 +1174,6 @@ pub fn batch_i64_to_scalar(inputs: &[i64], outputs: &mut [Scalar]) {
             outputs[i] = i64_to_scalar(inputs[i]);
         }
     }
-    #[cfg(not(feature = "simd"))]
-    {
-        for (i, &value) in inputs.iter().enumerate() {
-            outputs[i] = i64_to_scalar(value);
-        }
-    }
 }
 
 pub fn batch_compute_shifts<const N: usize>(
@@ -1199,7 +1182,6 @@ pub fn batch_compute_shifts<const N: usize>(
     j_start: usize,
     l1: usize
 ) {
-    #[cfg(feature = "simd")]
     {
         use crate::ecdlp::simd_types::i64x4;
         
@@ -1251,14 +1233,6 @@ pub fn batch_compute_shifts<const N: usize>(
             neg_shifts[i] = (j_start as i64 - j as i64) << l1;
             pos_shifts[i] = (j_start as i64 + j as i64) << l1;
         }
-    } 
-    #[cfg(not(feature = "simd"))]
-    {
-        for i in 0..N {
-            let j = i + 1;
-            neg_shifts[i] = (j_start as i64 - j as i64) << l1;
-            pos_shifts[i] = (j_start as i64 + j as i64) << l1;
-        }
     }
 }
 
@@ -1274,7 +1248,6 @@ fn fast_ecdlp_simd(
     pseudo_constant_time: bool,
     end_flag: &AtomicBool,
     progress_report: impl ProgressReportFunction,
-    t2_cache: &[AffineMontgomeryPoint; BATCH_SIZE],
     t2_cache_alpha: &[FieldElement; BATCH_SIZE],
     t2_u_values: &[FieldElement; BATCH_SIZE],
     t2_vs: &[FieldElement; BATCH_SIZE],
@@ -1296,7 +1269,7 @@ fn fast_ecdlp_simd(
         let mut pos = 0;
 
         cfg_if! {
-            if #[cfg(all(feature = "simd", curve25519_dalek_bits = "64", target_feature = "avx2"))] {
+            if #[cfg(all(curve25519_dalek_bits = "64", target_feature = "avx2"))] {
                 const CHUNK_SIZE: usize = 4;
                 while pos + CHUNK_SIZE <= N {
                     let a_chunk: &[FieldElement; 4] = (&a[pos..pos + 4]).try_into().unwrap();
@@ -1323,7 +1296,7 @@ fn fast_ecdlp_simd(
     let mut found = None;
     let l1 = precomputed_tables.get_l1();
 
-    let (mut qx_out, mut qx_tmp) = (qxs, neg_qxs);
+    let (qx_out, qx_tmp) = (qxs, neg_qxs);
     
     'outer: for (index, j_start, target_montgomery, progress) in point_iterator {
         let mut consider_candidate = |m| {

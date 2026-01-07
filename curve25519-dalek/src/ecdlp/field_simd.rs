@@ -1,6 +1,6 @@
 use crate::field::FieldElement;
 use crate::backend::simd::SimdBackend;
-use crate::ecdlp::simd_types::{U64x4 as u64x4, U32x4 as u32x4, U32x8 as u32x8};
+use crate::ecdlp::simd_types::{U64x4 as u64x4};
 
 // Generic 4-way batch subtraction
 #[inline(always)]
@@ -33,6 +33,7 @@ fn batch_subtract_4way_impl<B: SimdBackend>(
 
 // Generic 4-way batch subtraction with vectorized targets
 #[inline(always)]
+#[allow(dead_code)]
 fn batch_subtract_4way_vec_impl<B: SimdBackend>(
     batch: &[FieldElement; 4],
     targets: &[FieldElement; 4],

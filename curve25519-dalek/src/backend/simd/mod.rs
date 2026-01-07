@@ -108,6 +108,7 @@ impl SimdBackend for Backend64 {
 }
 
 /// 32-bit backend using 10 limbs, batching 4 field elements with U32x4
+#[allow(dead_code)]
 pub struct Backend32x4;
 
 #[cfg(curve25519_dalek_bits = "32")]
@@ -172,6 +173,7 @@ impl SimdBackend for Backend32x4 {
 }
 
 /// 32-bit backend using 10 limbs, batching 8 field elements with U32x8
+#[allow(dead_code)]
 pub struct Backend32;
 
 #[cfg(curve25519_dalek_bits = "32")]

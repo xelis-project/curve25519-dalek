@@ -103,5 +103,6 @@ check-cfg = [
     'cfg(curve25519_dalek_backend, values("fiat", "serial", "simd", "unstable_avx512"))',
     'cfg(curve25519_dalek_diagnostics, values("build"))',
     'cfg(curve25519_dalek_bits, values("32", "64"))',
+    'cfg(force_ecdlp_32bit_simd_test)',
     'cfg(nightly)',
 ]

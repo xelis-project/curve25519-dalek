@@ -26,6 +26,7 @@ impl U64x4 {
     }
 
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn broadcast(v: u64) -> Self {
         Self([v, v, v, v])
     }
@@ -51,15 +52,17 @@ impl U64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let sign_bit = _mm256_set1_epi64x(i64::MIN);
-            let a_flipped = _mm256_xor_si256(a_val, sign_bit);
-            let b_flipped = _mm256_xor_si256(b_val, sign_bit);
-            let r = _mm256_cmpgt_epi64(b_flipped, a_flipped);
-            let mut out = U64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let sign_bit = _mm256_set1_epi64x(i64::MIN);
+                let a_flipped = _mm256_xor_si256(a_val, sign_bit);
+                let b_flipped = _mm256_xor_si256(b_val, sign_bit);
+                let r = _mm256_cmpgt_epi64(b_flipped, a_flipped);
+                let mut out = U64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -67,17 +70,19 @@ impl U64x4 {
         #[inline]
         unsafe fn cmp_lt_neon(a: &U64x4, b: &U64x4) -> U64x4 {
             use std::arch::aarch64::*;
-            
-            let a0 = vld1q_u64(a.0.as_ptr());
-            let a1 = vld1q_u64(a.0.as_ptr().add(2));
-            let b0 = vld1q_u64(b.0.as_ptr());
-            let b1 = vld1q_u64(b.0.as_ptr().add(2));
-            let r0 = vcltq_u64(a0, b0);
-            let r1 = vcltq_u64(a1, b1);
-            let mut out = U64x4::ZERO;
-            vst1q_u64(out.0.as_mut_ptr(), r0);
-            vst1q_u64(out.0.as_mut_ptr().add(2), r1);
-            out
+
+            unsafe {
+                let a0 = vld1q_u64(a.0.as_ptr());
+                let a1 = vld1q_u64(a.0.as_ptr().add(2));
+                let b0 = vld1q_u64(b.0.as_ptr());
+                let b1 = vld1q_u64(b.0.as_ptr().add(2));
+                let r0 = vcltq_u64(a0, b0);
+                let r1 = vcltq_u64(a1, b1);
+                let mut out = U64x4::ZERO;
+                vst1q_u64(out.0.as_mut_ptr(), r0);
+                vst1q_u64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -97,6 +102,7 @@ impl U64x4 {
     }
 
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn cmp_eq(self, other: Self) -> Self {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         #[target_feature(enable = "avx2")]
@@ -107,12 +113,14 @@ impl U64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let r = _mm256_cmpeq_epi64(a_val, b_val);
-            let mut out = U64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let r = _mm256_cmpeq_epi64(a_val, b_val);
+                let mut out = U64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -120,17 +128,19 @@ impl U64x4 {
         #[inline]
         unsafe fn cmp_eq_neon(a: &U64x4, b: &U64x4) -> U64x4 {
             use std::arch::aarch64::*;
-            
-            let a0 = vld1q_u64(a.0.as_ptr());
-            let a1 = vld1q_u64(a.0.as_ptr().add(2));
-            let b0 = vld1q_u64(b.0.as_ptr());
-            let b1 = vld1q_u64(b.0.as_ptr().add(2));
-            let r0 = vceqq_u64(a0, b0);
-            let r1 = vceqq_u64(a1, b1);
-            let mut out = U64x4::ZERO;
-            vst1q_u64(out.0.as_mut_ptr(), r0);
-            vst1q_u64(out.0.as_mut_ptr().add(2), r1);
-            out
+
+            unsafe {
+                let a0 = vld1q_u64(a.0.as_ptr());
+                let a1 = vld1q_u64(a.0.as_ptr().add(2));
+                let b0 = vld1q_u64(b.0.as_ptr());
+                let b1 = vld1q_u64(b.0.as_ptr().add(2));
+                let r0 = vceqq_u64(a0, b0);
+                let r1 = vceqq_u64(a1, b1);
+                let mut out = U64x4::ZERO;
+                vst1q_u64(out.0.as_mut_ptr(), r0);
+                vst1q_u64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -162,14 +172,16 @@ impl U64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let mask_val = _mm256_loadu_si256(mask.0.as_ptr() as *const __m256i);
-            let true_val = _mm256_loadu_si256(t.0.as_ptr() as *const __m256i);
-            let false_val = _mm256_loadu_si256(f.0.as_ptr() as *const __m256i);
-            // _mm256_blendv_epi8(a, b, mask): selects from b when mask bit is 1, from a when 0
-            let r = _mm256_blendv_epi8(false_val, true_val, mask_val);
-            let mut out = U64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let mask_val = _mm256_loadu_si256(mask.0.as_ptr() as *const __m256i);
+                let true_val = _mm256_loadu_si256(t.0.as_ptr() as *const __m256i);
+                let false_val = _mm256_loadu_si256(f.0.as_ptr() as *const __m256i);
+                // _mm256_blendv_epi8(a, b, mask): selects from b when mask bit is 1, from a when 0
+                let r = _mm256_blendv_epi8(false_val, true_val, mask_val);
+                let mut out = U64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -177,20 +189,22 @@ impl U64x4 {
         #[inline]
         unsafe fn blend_neon(mask: &U64x4, t: &U64x4, f: &U64x4) -> U64x4 {
             use std::arch::aarch64::*;
-            
-            let m0 = vld1q_u64(mask.0.as_ptr());
-            let m1 = vld1q_u64(mask.0.as_ptr().add(2));
-            let t0 = vld1q_u64(t.0.as_ptr());
-            let t1 = vld1q_u64(t.0.as_ptr().add(2));
-            let f0 = vld1q_u64(f.0.as_ptr());
-            let f1 = vld1q_u64(f.0.as_ptr().add(2));
-            // vbslq_u64(mask, true, false)
-            let r0 = vbslq_u64(m0, t0, f0);
-            let r1 = vbslq_u64(m1, t1, f1);
-            let mut out = U64x4::ZERO;
-            vst1q_u64(out.0.as_mut_ptr(), r0);
-            vst1q_u64(out.0.as_mut_ptr().add(2), r1);
-            out
+
+            unsafe {
+                let m0 = vld1q_u64(mask.0.as_ptr());
+                let m1 = vld1q_u64(mask.0.as_ptr().add(2));
+                let t0 = vld1q_u64(t.0.as_ptr());
+                let t1 = vld1q_u64(t.0.as_ptr().add(2));
+                let f0 = vld1q_u64(f.0.as_ptr());
+                let f1 = vld1q_u64(f.0.as_ptr().add(2));
+                // vbslq_u64(mask, true, false)
+                let r0 = vbslq_u64(m0, t0, f0);
+                let r1 = vbslq_u64(m1, t1, f1);
+                let mut out = U64x4::ZERO;
+                vst1q_u64(out.0.as_mut_ptr(), r0);
+                vst1q_u64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -223,12 +237,14 @@ impl std::ops::Add for U64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let r = _mm256_add_epi64(a_val, b_val);
-            let mut out = U64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let r = _mm256_add_epi64(a_val, b_val);
+                let mut out = U64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -237,15 +253,17 @@ impl std::ops::Add for U64x4 {
         unsafe fn add_neon(a: &U64x4, b: &U64x4) -> U64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_u64(a.0.as_ptr());
-            let a1 = vld1q_u64(a.0.as_ptr().add(2));
-            let b0 = vld1q_u64(b.0.as_ptr());
-            let b1 = vld1q_u64(b.0.as_ptr().add(2));
-            let r0 = vaddq_u64(a0, b0);
-            let r1 = vaddq_u64(a1, b1);
-            let mut out = U64x4::ZERO;
-            vst1q_u64(out.0.as_mut_ptr(), r0);
-            vst1q_u64(out.0.as_mut_ptr().add(2), r1);
+            unsafe {
+                let a0 = vld1q_u64(a.0.as_ptr());
+                let a1 = vld1q_u64(a.0.as_ptr().add(2));
+                let b0 = vld1q_u64(b.0.as_ptr());
+                let b1 = vld1q_u64(b.0.as_ptr().add(2));
+                let r0 = vaddq_u64(a0, b0);
+                let r1 = vaddq_u64(a1, b1);
+                let mut out = U64x4::ZERO;
+                vst1q_u64(out.0.as_mut_ptr(), r0);
+                vst1q_u64(out.0.as_mut_ptr().add(2), r1);
+            }
             out
         }
 
@@ -279,12 +297,14 @@ impl std::ops::Sub for U64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let r = _mm256_sub_epi64(a_val, b_val);
-            let mut out = U64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let r = _mm256_sub_epi64(a_val, b_val);
+                let mut out = U64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -293,16 +313,18 @@ impl std::ops::Sub for U64x4 {
         unsafe fn sub_neon(a: &U64x4, b: &U64x4) -> U64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_u64(a.0.as_ptr());
-            let a1 = vld1q_u64(a.0.as_ptr().add(2));
-            let b0 = vld1q_u64(b.0.as_ptr());
-            let b1 = vld1q_u64(b.0.as_ptr().add(2));
-            let r0 = vsubq_u64(a0, b0);
-            let r1 = vsubq_u64(a1, b1);
-            let mut out = U64x4::ZERO;
-            vst1q_u64(out.0.as_mut_ptr(), r0);
-            vst1q_u64(out.0.as_mut_ptr().add(2), r1);
-            out
+            unsafe {
+                let a0 = vld1q_u64(a.0.as_ptr());
+                let a1 = vld1q_u64(a.0.as_ptr().add(2));
+                let b0 = vld1q_u64(b.0.as_ptr());
+                let b1 = vld1q_u64(b.0.as_ptr().add(2));
+                let r0 = vsubq_u64(a0, b0);
+                let r1 = vsubq_u64(a1, b1);
+                let mut out = U64x4::ZERO;
+                vst1q_u64(out.0.as_mut_ptr(), r0);
+                vst1q_u64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -351,12 +373,14 @@ impl std::ops::BitAnd for U64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let r = _mm256_and_si256(a_val, b_val);
-            let mut out = U64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let r = _mm256_and_si256(a_val, b_val);
+                let mut out = U64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -365,16 +389,18 @@ impl std::ops::BitAnd for U64x4 {
         unsafe fn bitand_neon(a: &U64x4, b: &U64x4) -> U64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_u64(a.0.as_ptr());
-            let a1 = vld1q_u64(a.0.as_ptr().add(2));
-            let b0 = vld1q_u64(b.0.as_ptr());
-            let b1 = vld1q_u64(b.0.as_ptr().add(2));
-            let r0 = vandq_u64(a0, b0);
-            let r1 = vandq_u64(a1, b1);
-            let mut out = U64x4::ZERO;
-            vst1q_u64(out.0.as_mut_ptr(), r0);
-            vst1q_u64(out.0.as_mut_ptr().add(2), r1);
-            out
+            unsafe {
+                let a0 = vld1q_u64(a.0.as_ptr());
+                let a1 = vld1q_u64(a.0.as_ptr().add(2));
+                let b0 = vld1q_u64(b.0.as_ptr());
+                let b1 = vld1q_u64(b.0.as_ptr().add(2));
+                let r0 = vandq_u64(a0, b0);
+                let r1 = vandq_u64(a1, b1);
+                let mut out = U64x4::ZERO;
+                vst1q_u64(out.0.as_mut_ptr(), r0);
+                vst1q_u64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -407,12 +433,14 @@ impl std::ops::BitOr for U64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let r = _mm256_or_si256(a_val, b_val);
-            let mut out = U64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let r = _mm256_or_si256(a_val, b_val);
+                let mut out = U64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -421,16 +449,18 @@ impl std::ops::BitOr for U64x4 {
         unsafe fn bitor_neon(a: &U64x4, b: &U64x4) -> U64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_u64(a.0.as_ptr());
-            let a1 = vld1q_u64(a.0.as_ptr().add(2));
-            let b0 = vld1q_u64(b.0.as_ptr());
-            let b1 = vld1q_u64(b.0.as_ptr().add(2));
-            let r0 = vorrq_u64(a0, b0);
-            let r1 = vorrq_u64(a1, b1);
-            let mut out = U64x4::ZERO;
-            vst1q_u64(out.0.as_mut_ptr(), r0);
-            vst1q_u64(out.0.as_mut_ptr().add(2), r1);
-            out
+            unsafe {
+                let a0 = vld1q_u64(a.0.as_ptr());
+                let a1 = vld1q_u64(a.0.as_ptr().add(2));
+                let b0 = vld1q_u64(b.0.as_ptr());
+                let b1 = vld1q_u64(b.0.as_ptr().add(2));
+                let r0 = vorrq_u64(a0, b0);
+                let r1 = vorrq_u64(a1, b1);
+                let mut out = U64x4::ZERO;
+                vst1q_u64(out.0.as_mut_ptr(), r0);
+                vst1q_u64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -463,12 +493,14 @@ impl std::ops::BitXor for U64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let r = _mm256_xor_si256(a_val, b_val);
-            let mut out = U64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let r = _mm256_xor_si256(a_val, b_val);
+                let mut out = U64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -477,16 +509,18 @@ impl std::ops::BitXor for U64x4 {
         unsafe fn bitxor_neon(a: &U64x4, b: &U64x4) -> U64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_u64(a.0.as_ptr());
-            let a1 = vld1q_u64(a.0.as_ptr().add(2));
-            let b0 = vld1q_u64(b.0.as_ptr());
-            let b1 = vld1q_u64(b.0.as_ptr().add(2));
-            let r0 = veorq_u64(a0, b0);
-            let r1 = veorq_u64(a1, b1);
-            let mut out = U64x4::ZERO;
-            vst1q_u64(out.0.as_mut_ptr(), r0);
-            vst1q_u64(out.0.as_mut_ptr().add(2), r1);
-            out
+            unsafe {
+                let a0 = vld1q_u64(a.0.as_ptr());
+                let a1 = vld1q_u64(a.0.as_ptr().add(2));
+                let b0 = vld1q_u64(b.0.as_ptr());
+                let b1 = vld1q_u64(b.0.as_ptr().add(2));
+                let r0 = veorq_u64(a0, b0);
+                let r1 = veorq_u64(a1, b1);
+                let mut out = U64x4::ZERO;
+                vst1q_u64(out.0.as_mut_ptr(), r0);
+                vst1q_u64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -519,12 +553,14 @@ impl std::ops::Not for U64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let ones = _mm256_set1_epi64x(-1i64);
-            let r = _mm256_xor_si256(a_val, ones);
-            let mut out = U64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let ones = _mm256_set1_epi64x(-1i64);
+                let r = _mm256_xor_si256(a_val, ones);
+                let mut out = U64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(all(target_arch = "aarch64", not(target_os = "macos")))]
@@ -533,14 +569,16 @@ impl std::ops::Not for U64x4 {
         unsafe fn not_neon(a: &U64x4) -> U64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_u64(a.0.as_ptr());
-            let a1 = vld1q_u64(a.0.as_ptr().add(2));
-            let r0 = vmvnq_u64(a0);
-            let r1 = vmvnq_u64(a1);
-            let mut out = U64x4::ZERO;
-            vst1q_u64(out.0.as_mut_ptr(), r0);
-            vst1q_u64(out.0.as_mut_ptr().add(2), r1);
-            out
+            unsafe {
+                let a0 = vld1q_u64(a.0.as_ptr());
+                let a1 = vld1q_u64(a.0.as_ptr().add(2));
+                let r0 = vmvnq_u64(a0);
+                let r1 = vmvnq_u64(a1);
+                let mut out = U64x4::ZERO;
+                vst1q_u64(out.0.as_mut_ptr(), r0);
+                vst1q_u64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
@@ -549,16 +587,18 @@ impl std::ops::Not for U64x4 {
         unsafe fn not_neon_macos(a: &U64x4) -> U64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_u64(a.0.as_ptr());
-            let a1 = vld1q_u64(a.0.as_ptr().add(2));
-            // Use XOR with all 1s as fallback for macOS
-            let ones = vdupq_n_u64(u64::MAX);
-            let r0 = veorq_u64(a0, ones);
-            let r1 = veorq_u64(a1, ones);
-            let mut out = U64x4::ZERO;
-            vst1q_u64(out.0.as_mut_ptr(), r0);
-            vst1q_u64(out.0.as_mut_ptr().add(2), r1);
-            out
+            unsafe {
+                let a0 = vld1q_u64(a.0.as_ptr());
+                let a1 = vld1q_u64(a.0.as_ptr().add(2));
+                // Use XOR with all 1s as fallback for macOS
+                let ones = vdupq_n_u64(u64::MAX);
+                let r0 = veorq_u64(a0, ones);
+                let r1 = veorq_u64(a1, ones);
+                let mut out = U64x4::ZERO;
+                vst1q_u64(out.0.as_mut_ptr(), r0);
+                vst1q_u64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -593,12 +633,14 @@ impl std::ops::Shl<i32> for U64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let shift_vec = _mm256_set1_epi64x(shift as i64);
-            let r = _mm256_sllv_epi64(a_val, shift_vec);
-            let mut out = U64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let shift_vec = _mm256_set1_epi64x(shift as i64);
+                let r = _mm256_sllv_epi64(a_val, shift_vec);
+                let mut out = U64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -607,15 +649,17 @@ impl std::ops::Shl<i32> for U64x4 {
         unsafe fn shl_neon(a: &U64x4, shift: i32) -> U64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_u64(a.0.as_ptr());
-            let a1 = vld1q_u64(a.0.as_ptr().add(2));
-            let shift_vec = vdupq_n_s64(shift as i64);
-            let r0 = vshlq_u64(a0, shift_vec);
-            let r1 = vshlq_u64(a1, shift_vec);
-            let mut out = U64x4::ZERO;
-            vst1q_u64(out.0.as_mut_ptr(), r0);
-            vst1q_u64(out.0.as_mut_ptr().add(2), r1);
-            out
+            unsafe {
+                let a0 = vld1q_u64(a.0.as_ptr());
+                let a1 = vld1q_u64(a.0.as_ptr().add(2));
+                let shift_vec = vdupq_n_s64(shift as i64);
+                let r0 = vshlq_u64(a0, shift_vec);
+                let r1 = vshlq_u64(a1, shift_vec);
+                let mut out = U64x4::ZERO;
+                vst1q_u64(out.0.as_mut_ptr(), r0);
+                vst1q_u64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -648,12 +692,14 @@ impl std::ops::Shr<i32> for U64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let shift_vec = _mm256_set1_epi64x(shift as i64);
-            let r = _mm256_srlv_epi64(a_val, shift_vec);
-            let mut out = U64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let shift_vec = _mm256_set1_epi64x(shift as i64);
+                let r = _mm256_srlv_epi64(a_val, shift_vec);
+                let mut out = U64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -662,15 +708,17 @@ impl std::ops::Shr<i32> for U64x4 {
         unsafe fn shr_neon(a: &U64x4, shift: i32) -> U64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_u64(a.0.as_ptr());
-            let a1 = vld1q_u64(a.0.as_ptr().add(2));
-            let shift_vec = vdupq_n_s64(-(shift as i64));
-            let r0 = vshlq_u64(a0, shift_vec);
-            let r1 = vshlq_u64(a1, shift_vec);
-            let mut out = U64x4::ZERO;
-            vst1q_u64(out.0.as_mut_ptr(), r0);
-            vst1q_u64(out.0.as_mut_ptr().add(2), r1);
-            out
+            unsafe {
+                let a0 = vld1q_u64(a.0.as_ptr());
+                let a1 = vld1q_u64(a.0.as_ptr().add(2));
+                let shift_vec = vdupq_n_s64(-(shift as i64));
+                let r0 = vshlq_u64(a0, shift_vec);
+                let r1 = vshlq_u64(a1, shift_vec);
+                let mut out = U64x4::ZERO;
+                vst1q_u64(out.0.as_mut_ptr(), r0);
+                vst1q_u64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -691,10 +739,12 @@ impl std::ops::Shr<i32> for U64x4 {
 }
 
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 #[repr(C, align(32))]
 pub struct I64x4(pub [i64; 4]);
 
+#[allow(dead_code)]
 impl I64x4 {
     pub const ZERO: Self = Self([0; 4]);
 
@@ -734,12 +784,14 @@ impl I64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let r = _mm256_cmpgt_epi64(a_val, b_val);
-            let mut out = I64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let r = _mm256_cmpgt_epi64(a_val, b_val);
+                let mut out = I64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -748,16 +800,18 @@ impl I64x4 {
         unsafe fn cmp_gt_neon(a: &I64x4, b: &I64x4) -> I64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_s64(a.0.as_ptr());
-            let a1 = vld1q_s64(a.0.as_ptr().add(2));
-            let b0 = vld1q_s64(b.0.as_ptr());
-            let b1 = vld1q_s64(b.0.as_ptr().add(2));
-            let r0 = vcgtq_s64(a0, b0);
-            let r1 = vcgtq_s64(a1, b1);
-            let mut out = I64x4::ZERO;
-            vst1q_s64(out.0.as_mut_ptr(), vreinterpretq_s64_u64(r0));
-            vst1q_s64(out.0.as_mut_ptr().add(2), vreinterpretq_s64_u64(r1));
-            out
+            unsafe {
+                let a0 = vld1q_s64(a.0.as_ptr());
+                let a1 = vld1q_s64(a.0.as_ptr().add(2));
+                let b0 = vld1q_s64(b.0.as_ptr());
+                let b1 = vld1q_s64(b.0.as_ptr().add(2));
+                let r0 = vcgtq_s64(a0, b0);
+                let r1 = vcgtq_s64(a1, b1);
+                let mut out = I64x4::ZERO;
+                vst1q_s64(out.0.as_mut_ptr(), vreinterpretq_s64_u64(r0));
+                vst1q_s64(out.0.as_mut_ptr().add(2), vreinterpretq_s64_u64(r1));
+                out
+            }
         }
 
         cfg_if! {
@@ -792,12 +846,14 @@ impl I64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let r = _mm256_cmpeq_epi64(a_val, b_val);
-            let mut out = I64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let r = _mm256_cmpeq_epi64(a_val, b_val);
+                let mut out = I64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -806,16 +862,18 @@ impl I64x4 {
         unsafe fn cmp_eq_neon(a: &I64x4, b: &I64x4) -> I64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_s64(a.0.as_ptr());
-            let a1 = vld1q_s64(a.0.as_ptr().add(2));
-            let b0 = vld1q_s64(b.0.as_ptr());
-            let b1 = vld1q_s64(b.0.as_ptr().add(2));
-            let r0 = vceqq_s64(a0, b0);
-            let r1 = vceqq_s64(a1, b1);
-            let mut out = I64x4::ZERO;
-            vst1q_s64(out.0.as_mut_ptr(), vreinterpretq_s64_u64(r0));
-            vst1q_s64(out.0.as_mut_ptr().add(2), vreinterpretq_s64_u64(r1));
-            out
+            unsafe {
+                let a0 = vld1q_s64(a.0.as_ptr());
+                let a1 = vld1q_s64(a.0.as_ptr().add(2));
+                let b0 = vld1q_s64(b.0.as_ptr());
+                let b1 = vld1q_s64(b.0.as_ptr().add(2));
+                let r0 = vceqq_s64(a0, b0);
+                let r1 = vceqq_s64(a1, b1);
+                let mut out = I64x4::ZERO;
+                vst1q_s64(out.0.as_mut_ptr(), vreinterpretq_s64_u64(r0));
+                vst1q_s64(out.0.as_mut_ptr().add(2), vreinterpretq_s64_u64(r1));
+                out
+            }
         }
 
         cfg_if! {
@@ -847,13 +905,15 @@ impl I64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let mask_val = _mm256_loadu_si256(mask.0.as_ptr() as *const __m256i);
-            let true_val = _mm256_loadu_si256(t.0.as_ptr() as *const __m256i);
-            let false_val = _mm256_loadu_si256(f.0.as_ptr() as *const __m256i);
-            let r = _mm256_blendv_epi8(false_val, true_val, mask_val);
-            let mut out = I64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let mask_val = _mm256_loadu_si256(mask.0.as_ptr() as *const __m256i);
+                let true_val = _mm256_loadu_si256(t.0.as_ptr() as *const __m256i);
+                let false_val = _mm256_loadu_si256(f.0.as_ptr() as *const __m256i);
+                let r = _mm256_blendv_epi8(false_val, true_val, mask_val);
+                let mut out = I64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -862,18 +922,20 @@ impl I64x4 {
         unsafe fn blend_neon(mask: &I64x4, t: &I64x4, f: &I64x4) -> I64x4 {
             use std::arch::aarch64::*;
             
-            let m0 = vld1q_u64(mask.0.as_ptr() as *const u64);
-            let m1 = vld1q_u64(mask.0.as_ptr().add(2) as *const u64);
-            let t0 = vld1q_s64(t.0.as_ptr());
-            let t1 = vld1q_s64(t.0.as_ptr().add(2));
-            let f0 = vld1q_s64(f.0.as_ptr());
-            let f1 = vld1q_s64(f.0.as_ptr().add(2));
-            let r0 = vbslq_s64(m0, t0, f0);
-            let r1 = vbslq_s64(m1, t1, f1);
-            let mut out = I64x4::ZERO;
-            vst1q_s64(out.0.as_mut_ptr(), r0);
-            vst1q_s64(out.0.as_mut_ptr().add(2), r1);
-            out
+            unsafe {
+                let m0 = vld1q_u64(mask.0.as_ptr() as *const u64);
+                let m1 = vld1q_u64(mask.0.as_ptr().add(2) as *const u64);
+                let t0 = vld1q_s64(t.0.as_ptr());
+                let t1 = vld1q_s64(t.0.as_ptr().add(2));
+                let f0 = vld1q_s64(f.0.as_ptr());
+                let f1 = vld1q_s64(f.0.as_ptr().add(2));
+                let r0 = vbslq_s64(m0, t0, f0);
+                let r1 = vbslq_s64(m1, t1, f1);
+                let mut out = I64x4::ZERO;
+                vst1q_s64(out.0.as_mut_ptr(), r0);
+                vst1q_s64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -906,12 +968,14 @@ impl std::ops::Add for I64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let r = _mm256_add_epi64(a_val, b_val);
-            let mut out = I64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let r = _mm256_add_epi64(a_val, b_val);
+                let mut out = I64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -920,16 +984,18 @@ impl std::ops::Add for I64x4 {
         unsafe fn add_neon(a: &I64x4, b: &I64x4) -> I64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_s64(a.0.as_ptr());
-            let a1 = vld1q_s64(a.0.as_ptr().add(2));
-            let b0 = vld1q_s64(b.0.as_ptr());
-            let b1 = vld1q_s64(b.0.as_ptr().add(2));
-            let r0 = vaddq_s64(a0, b0);
-            let r1 = vaddq_s64(a1, b1);
-            let mut out = I64x4::ZERO;
-            vst1q_s64(out.0.as_mut_ptr(), r0);
-            vst1q_s64(out.0.as_mut_ptr().add(2), r1);
-            out
+            unsafe {
+                let a0 = vld1q_s64(a.0.as_ptr());
+                let a1 = vld1q_s64(a.0.as_ptr().add(2));
+                let b0 = vld1q_s64(b.0.as_ptr());
+                let b1 = vld1q_s64(b.0.as_ptr().add(2));
+                let r0 = vaddq_s64(a0, b0);
+                let r1 = vaddq_s64(a1, b1);
+                let mut out = I64x4::ZERO;
+                vst1q_s64(out.0.as_mut_ptr(), r0);
+                vst1q_s64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -962,12 +1028,14 @@ impl std::ops::Sub for I64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let r = _mm256_sub_epi64(a_val, b_val);
-            let mut out = I64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let r = _mm256_sub_epi64(a_val, b_val);
+                let mut out = I64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -976,16 +1044,18 @@ impl std::ops::Sub for I64x4 {
         unsafe fn sub_neon(a: &I64x4, b: &I64x4) -> I64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_s64(a.0.as_ptr());
-            let a1 = vld1q_s64(a.0.as_ptr().add(2));
-            let b0 = vld1q_s64(b.0.as_ptr());
-            let b1 = vld1q_s64(b.0.as_ptr().add(2));
-            let r0 = vsubq_s64(a0, b0);
-            let r1 = vsubq_s64(a1, b1);
-            let mut out = I64x4::ZERO;
-            vst1q_s64(out.0.as_mut_ptr(), r0);
-            vst1q_s64(out.0.as_mut_ptr().add(2), r1);
-            out
+            unsafe {
+                let a0 = vld1q_s64(a.0.as_ptr());
+                let a1 = vld1q_s64(a.0.as_ptr().add(2));
+                let b0 = vld1q_s64(b.0.as_ptr());
+                let b1 = vld1q_s64(b.0.as_ptr().add(2));
+                let r0 = vsubq_s64(a0, b0);
+                let r1 = vsubq_s64(a1, b1);
+                let mut out = I64x4::ZERO;
+                vst1q_s64(out.0.as_mut_ptr(), r0);
+                vst1q_s64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -1018,19 +1088,21 @@ impl std::ops::Mul for I64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let a_hi = _mm256_srli_epi64(a_val, 32);
-            let b_hi = _mm256_srli_epi64(b_val, 32);
-            let lo_lo = _mm256_mul_epu32(a_val, b_val);
-            let lo_hi = _mm256_mul_epu32(a_val, b_hi);
-            let hi_lo = _mm256_mul_epu32(a_hi, b_val);
-            let mid = _mm256_add_epi64(lo_hi, hi_lo);
-            let mid_shifted = _mm256_slli_epi64(mid, 32);
-            let r = _mm256_add_epi64(lo_lo, mid_shifted);
-            let mut out = I64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let a_hi = _mm256_srli_epi64(a_val, 32);
+                let b_hi = _mm256_srli_epi64(b_val, 32);
+                let lo_lo = _mm256_mul_epu32(a_val, b_val);
+                let lo_hi = _mm256_mul_epu32(a_val, b_hi);
+                let hi_lo = _mm256_mul_epu32(a_hi, b_val);
+                let mid = _mm256_add_epi64(lo_hi, hi_lo);
+                let mid_shifted = _mm256_slli_epi64(mid, 32);
+                let r = _mm256_add_epi64(lo_lo, mid_shifted);
+                let mut out = I64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         cfg_if! {
@@ -1061,12 +1133,14 @@ impl std::ops::Neg for I64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let zero = _mm256_setzero_si256();
-            let r = _mm256_sub_epi64(zero, a_val);
-            let mut out = I64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let zero = _mm256_setzero_si256();
+                let r = _mm256_sub_epi64(zero, a_val);
+                let mut out = I64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -1075,14 +1149,16 @@ impl std::ops::Neg for I64x4 {
         unsafe fn neg_neon(a: &I64x4) -> I64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_s64(a.0.as_ptr());
-            let a1 = vld1q_s64(a.0.as_ptr().add(2));
-            let r0 = vnegq_s64(a0);
-            let r1 = vnegq_s64(a1);
-            let mut out = I64x4::ZERO;
-            vst1q_s64(out.0.as_mut_ptr(), r0);
-            vst1q_s64(out.0.as_mut_ptr().add(2), r1);
-            out
+            unsafe {
+                let a0 = vld1q_s64(a.0.as_ptr());
+                let a1 = vld1q_s64(a.0.as_ptr().add(2));
+                let r0 = vnegq_s64(a0);
+                let r1 = vnegq_s64(a1);
+                let mut out = I64x4::ZERO;
+                vst1q_s64(out.0.as_mut_ptr(), r0);
+                vst1q_s64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -1115,12 +1191,14 @@ impl std::ops::BitAnd for I64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let r = _mm256_and_si256(a_val, b_val);
-            let mut out = I64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let r = _mm256_and_si256(a_val, b_val);
+                let mut out = I64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -1129,16 +1207,18 @@ impl std::ops::BitAnd for I64x4 {
         unsafe fn bitand_neon(a: &I64x4, b: &I64x4) -> I64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_s64(a.0.as_ptr());
-            let a1 = vld1q_s64(a.0.as_ptr().add(2));
-            let b0 = vld1q_s64(b.0.as_ptr());
-            let b1 = vld1q_s64(b.0.as_ptr().add(2));
-            let r0 = vandq_s64(a0, b0);
-            let r1 = vandq_s64(a1, b1);
-            let mut out = I64x4::ZERO;
-            vst1q_s64(out.0.as_mut_ptr(), r0);
-            vst1q_s64(out.0.as_mut_ptr().add(2), r1);
-            out
+            unsafe {
+                let a0 = vld1q_s64(a.0.as_ptr());
+                let a1 = vld1q_s64(a.0.as_ptr().add(2));
+                let b0 = vld1q_s64(b.0.as_ptr());
+                let b1 = vld1q_s64(b.0.as_ptr().add(2));
+                let r0 = vandq_s64(a0, b0);
+                let r1 = vandq_s64(a1, b1);
+                let mut out = I64x4::ZERO;
+                vst1q_s64(out.0.as_mut_ptr(), r0);
+                vst1q_s64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -1171,12 +1251,14 @@ impl std::ops::BitOr for I64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let r = _mm256_or_si256(a_val, b_val);
-            let mut out = I64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let r = _mm256_or_si256(a_val, b_val);
+                let mut out = I64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -1185,16 +1267,18 @@ impl std::ops::BitOr for I64x4 {
         unsafe fn bitor_neon(a: &I64x4, b: &I64x4) -> I64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_s64(a.0.as_ptr());
-            let a1 = vld1q_s64(a.0.as_ptr().add(2));
-            let b0 = vld1q_s64(b.0.as_ptr());
-            let b1 = vld1q_s64(b.0.as_ptr().add(2));
-            let r0 = vorrq_s64(a0, b0);
-            let r1 = vorrq_s64(a1, b1);
-            let mut out = I64x4::ZERO;
-            vst1q_s64(out.0.as_mut_ptr(), r0);
-            vst1q_s64(out.0.as_mut_ptr().add(2), r1);
-            out
+            unsafe {
+                let a0 = vld1q_s64(a.0.as_ptr());
+                let a1 = vld1q_s64(a.0.as_ptr().add(2));
+                let b0 = vld1q_s64(b.0.as_ptr());
+                let b1 = vld1q_s64(b.0.as_ptr().add(2));
+                let r0 = vorrq_s64(a0, b0);
+                let r1 = vorrq_s64(a1, b1);
+                let mut out = I64x4::ZERO;
+                vst1q_s64(out.0.as_mut_ptr(), r0);
+                vst1q_s64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -1227,12 +1311,14 @@ impl std::ops::BitXor for I64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let r = _mm256_xor_si256(a_val, b_val);
-            let mut out = I64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let r = _mm256_xor_si256(a_val, b_val);
+                let mut out = I64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -1241,16 +1327,18 @@ impl std::ops::BitXor for I64x4 {
         unsafe fn bitxor_neon(a: &I64x4, b: &I64x4) -> I64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_s64(a.0.as_ptr());
-            let a1 = vld1q_s64(a.0.as_ptr().add(2));
-            let b0 = vld1q_s64(b.0.as_ptr());
-            let b1 = vld1q_s64(b.0.as_ptr().add(2));
-            let r0 = veorq_s64(a0, b0);
-            let r1 = veorq_s64(a1, b1);
-            let mut out = I64x4::ZERO;
-            vst1q_s64(out.0.as_mut_ptr(), r0);
-            vst1q_s64(out.0.as_mut_ptr().add(2), r1);
-            out
+            unsafe {
+                let a0 = vld1q_s64(a.0.as_ptr());
+                let a1 = vld1q_s64(a.0.as_ptr().add(2));
+                let b0 = vld1q_s64(b.0.as_ptr());
+                let b1 = vld1q_s64(b.0.as_ptr().add(2));
+                let r0 = veorq_s64(a0, b0);
+                let r1 = veorq_s64(a1, b1);
+                let mut out = I64x4::ZERO;
+                vst1q_s64(out.0.as_mut_ptr(), r0);
+                vst1q_s64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -1283,17 +1371,19 @@ impl std::ops::Shr<i32> for I64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let shift_vec = _mm256_set1_epi64x(amt as i64);
-            let zero = _mm256_setzero_si256();
-            let sign = _mm256_cmpgt_epi64(zero, a_val);
-            let shifted = _mm256_srlv_epi64(a_val, shift_vec);
-            let sign_shift = _mm256_set1_epi64x((64 - amt) as i64);
-            let sign_mask = _mm256_sllv_epi64(sign, sign_shift);
-            let r = _mm256_or_si256(shifted, sign_mask);
-            let mut out = I64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let shift_vec = _mm256_set1_epi64x(amt as i64);
+                let zero = _mm256_setzero_si256();
+                let sign = _mm256_cmpgt_epi64(zero, a_val);
+                let shifted = _mm256_srlv_epi64(a_val, shift_vec);
+                let sign_shift = _mm256_set1_epi64x((64 - amt) as i64);
+                let sign_mask = _mm256_sllv_epi64(sign, sign_shift);
+                let r = _mm256_or_si256(shifted, sign_mask);
+                let mut out = I64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -1302,15 +1392,17 @@ impl std::ops::Shr<i32> for I64x4 {
         unsafe fn shr_neon(a: &I64x4, amt: i32) -> I64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_s64(a.0.as_ptr());
-            let a1 = vld1q_s64(a.0.as_ptr().add(2));
-            let shift = vdupq_n_s64(-(amt as i64));
-            let r0 = vshlq_s64(a0, shift);
-            let r1 = vshlq_s64(a1, shift);
-            let mut out = I64x4::ZERO;
-            vst1q_s64(out.0.as_mut_ptr(), r0);
-            vst1q_s64(out.0.as_mut_ptr().add(2), r1);
-            out
+            unsafe {
+                let a0 = vld1q_s64(a.0.as_ptr());
+                let a1 = vld1q_s64(a.0.as_ptr().add(2));
+                let shift = vdupq_n_s64(-(amt as i64));
+                let r0 = vshlq_s64(a0, shift);
+                let r1 = vshlq_s64(a1, shift);
+                let mut out = I64x4::ZERO;
+                vst1q_s64(out.0.as_mut_ptr(), r0);
+                vst1q_s64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -1343,12 +1435,14 @@ impl std::ops::Shl<i32> for I64x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let shift = _mm256_set1_epi64x(amt as i64);
-            let r = _mm256_sllv_epi64(a_val, shift);
-            let mut out = I64x4::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let shift = _mm256_set1_epi64x(amt as i64);
+                let r = _mm256_sllv_epi64(a_val, shift);
+                let mut out = I64x4::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -1357,15 +1451,17 @@ impl std::ops::Shl<i32> for I64x4 {
         unsafe fn shl_neon(a: &I64x4, amt: i32) -> I64x4 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_s64(a.0.as_ptr());
-            let a1 = vld1q_s64(a.0.as_ptr().add(2));
-            let shift = vdupq_n_s64(amt as i64);
-            let r0 = vshlq_s64(a0, shift);
-            let r1 = vshlq_s64(a1, shift);
-            let mut out = I64x4::ZERO;
-            vst1q_s64(out.0.as_mut_ptr(), r0);
-            vst1q_s64(out.0.as_mut_ptr().add(2), r1);
-            out
+            unsafe {
+                let a0 = vld1q_s64(a.0.as_ptr());
+                let a1 = vld1q_s64(a.0.as_ptr().add(2));
+                let shift = vdupq_n_s64(amt as i64);
+                let r0 = vshlq_s64(a0, shift);
+                let r1 = vshlq_s64(a1, shift);
+                let mut out = I64x4::ZERO;
+                vst1q_s64(out.0.as_mut_ptr(), r0);
+                vst1q_s64(out.0.as_mut_ptr().add(2), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -1396,6 +1492,7 @@ impl From<[i64; 4]> for I64x4 {
 // U32x4 - 4-lane u32 vector
 // ============================================================================
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 #[repr(C, align(16))]
 pub struct U32x4(pub [u32; 4]);
@@ -1439,12 +1536,14 @@ impl U32x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm_loadu_si128(a.0.as_ptr() as *const __m128i);
-            let b_val = _mm_loadu_si128(b.0.as_ptr() as *const __m128i);
-            let r = _mm_cmpeq_epi32(a_val, b_val);
-            let mut out = U32x4::ZERO;
-            _mm_storeu_si128(out.0.as_mut_ptr() as *mut __m128i, r);
-            out
+            unsafe {
+                let a_val = _mm_loadu_si128(a.0.as_ptr() as *const __m128i);
+                let b_val = _mm_loadu_si128(b.0.as_ptr() as *const __m128i);
+                let r = _mm_cmpeq_epi32(a_val, b_val);
+                let mut out = U32x4::ZERO;
+                _mm_storeu_si128(out.0.as_mut_ptr() as *mut __m128i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -1453,12 +1552,14 @@ impl U32x4 {
         unsafe fn cmp_eq_neon(a: &U32x4, b: &U32x4) -> U32x4 {
             use std::arch::aarch64::*;
             
-            let a_val = vld1q_u32(a.0.as_ptr());
-            let b_val = vld1q_u32(b.0.as_ptr());
-            let r = vceqq_u32(a_val, b_val);
-            let mut out = U32x4::ZERO;
-            vst1q_u32(out.0.as_mut_ptr(), r);
-            out
+            unsafe {
+                let a_val = vld1q_u32(a.0.as_ptr());
+                let b_val = vld1q_u32(b.0.as_ptr());
+                let r = vceqq_u32(a_val, b_val);
+                let mut out = U32x4::ZERO;
+                vst1q_u32(out.0.as_mut_ptr(), r);
+                out
+            }
         }
 
         cfg_if! {
@@ -1488,16 +1589,18 @@ impl U32x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm_loadu_si128(a.0.as_ptr() as *const __m128i);
-            let b_val = _mm_loadu_si128(b.0.as_ptr() as *const __m128i);
-            // For unsigned comparison, we need to subtract 2^31 from both values
-            let sign_bit = _mm_set1_epi32(i32::MIN);
-            let a_flipped = _mm_xor_si128(a_val, sign_bit);
-            let b_flipped = _mm_xor_si128(b_val, sign_bit);
-            let r = _mm_cmplt_epi32(a_flipped, b_flipped);
-            let mut out = U32x4::ZERO;
-            _mm_storeu_si128(out.0.as_mut_ptr() as *mut __m128i, r);
-            out
+            unsafe {
+                let a_val = _mm_loadu_si128(a.0.as_ptr() as *const __m128i);
+                let b_val = _mm_loadu_si128(b.0.as_ptr() as *const __m128i);
+                // For unsigned comparison, we need to subtract 2^31 from both values
+                let sign_bit = _mm_set1_epi32(i32::MIN);
+                let a_flipped = _mm_xor_si128(a_val, sign_bit);
+                let b_flipped = _mm_xor_si128(b_val, sign_bit);
+                let r = _mm_cmplt_epi32(a_flipped, b_flipped);
+                let mut out = U32x4::ZERO;
+                _mm_storeu_si128(out.0.as_mut_ptr() as *mut __m128i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -1506,12 +1609,14 @@ impl U32x4 {
         unsafe fn cmp_lt_neon(a: &U32x4, b: &U32x4) -> U32x4 {
             use std::arch::aarch64::*;
 
-            let a_val = vld1q_u32(a.0.as_ptr());
-            let b_val = vld1q_u32(b.0.as_ptr());
-            let r = vcltq_u32(a_val, b_val);
-            let mut out = U32x4::ZERO;
-            vst1q_u32(out.0.as_mut_ptr(), r);
-            out
+            unsafe {
+                let a_val = vld1q_u32(a.0.as_ptr());
+                let b_val = vld1q_u32(b.0.as_ptr());
+                let r = vcltq_u32(a_val, b_val);
+                let mut out = U32x4::ZERO;
+                vst1q_u32(out.0.as_mut_ptr(), r);
+                out
+            }
         }
 
         cfg_if! {
@@ -1541,13 +1646,15 @@ impl U32x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let mask_val = _mm_loadu_si128(mask.0.as_ptr() as *const __m128i);
-            let true_val_vec = _mm_loadu_si128(true_val.0.as_ptr() as *const __m128i);
-            let false_val_vec = _mm_loadu_si128(false_val.0.as_ptr() as *const __m128i);
-            let r = _mm_blendv_epi8(false_val_vec, true_val_vec, mask_val);
-            let mut out = U32x4::ZERO;
-            _mm_storeu_si128(out.0.as_mut_ptr() as *mut __m128i, r);
-            out
+            unsafe {
+                let mask_val = _mm_loadu_si128(mask.0.as_ptr() as *const __m128i);
+                let true_val_vec = _mm_loadu_si128(true_val.0.as_ptr() as *const __m128i);
+                let false_val_vec = _mm_loadu_si128(false_val.0.as_ptr() as *const __m128i);
+                let r = _mm_blendv_epi8(false_val_vec, true_val_vec, mask_val);
+                let mut out = U32x4::ZERO;
+                _mm_storeu_si128(out.0.as_mut_ptr() as *mut __m128i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -1556,13 +1663,15 @@ impl U32x4 {
         unsafe fn blend_neon(mask: &U32x4, true_val: &U32x4, false_val: &U32x4) -> U32x4 {
             use std::arch::aarch64::*;
 
-            let mask_val = vld1q_u32(mask.0.as_ptr());
-            let true_val_vec = vld1q_u32(true_val.0.as_ptr());
-            let false_val_vec = vld1q_u32(false_val.0.as_ptr());
-            let r = vbslq_u32(mask_val, true_val_vec, false_val_vec);
-            let mut out = U32x4::ZERO;
-            vst1q_u32(out.0.as_mut_ptr(), r);
-            out
+            unsafe {
+                let mask_val = vld1q_u32(mask.0.as_ptr());
+                let true_val_vec = vld1q_u32(true_val.0.as_ptr());
+                let false_val_vec = vld1q_u32(false_val.0.as_ptr());
+                let r = vbslq_u32(mask_val, true_val_vec, false_val_vec);
+                let mut out = U32x4::ZERO;
+                vst1q_u32(out.0.as_mut_ptr(), r);
+                out
+            }
         }
 
         cfg_if! {
@@ -1595,12 +1704,14 @@ impl std::ops::Add for U32x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm_loadu_si128(a.0.as_ptr() as *const __m128i);
-            let b_val = _mm_loadu_si128(b.0.as_ptr() as *const __m128i);
-            let r = _mm_add_epi32(a_val, b_val);
-            let mut out = U32x4::ZERO;
-            _mm_storeu_si128(out.0.as_mut_ptr() as *mut __m128i, r);
-            out
+            unsafe {
+                let a_val = _mm_loadu_si128(a.0.as_ptr() as *const __m128i);
+                let b_val = _mm_loadu_si128(b.0.as_ptr() as *const __m128i);
+                let r = _mm_add_epi32(a_val, b_val);
+                let mut out = U32x4::ZERO;
+                _mm_storeu_si128(out.0.as_mut_ptr() as *mut __m128i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -1609,12 +1720,14 @@ impl std::ops::Add for U32x4 {
         unsafe fn add_neon(a: &U32x4, b: &U32x4) -> U32x4 {
             use std::arch::aarch64::*;
             
-            let a_val = vld1q_u32(a.0.as_ptr());
-            let b_val = vld1q_u32(b.0.as_ptr());
-            let r = vaddq_u32(a_val, b_val);
-            let mut out = U32x4::ZERO;
-            vst1q_u32(out.0.as_mut_ptr(), r);
-            out
+            unsafe {
+                let a_val = vld1q_u32(a.0.as_ptr());
+                let b_val = vld1q_u32(b.0.as_ptr());
+                let r = vaddq_u32(a_val, b_val);
+                let mut out = U32x4::ZERO;
+                vst1q_u32(out.0.as_mut_ptr(), r);
+                out
+            }
         }
 
         cfg_if! {
@@ -1647,12 +1760,14 @@ impl std::ops::Sub for U32x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm_loadu_si128(a.0.as_ptr() as *const __m128i);
-            let b_val = _mm_loadu_si128(b.0.as_ptr() as *const __m128i);
-            let r = _mm_sub_epi32(a_val, b_val);
-            let mut out = U32x4::ZERO;
-            _mm_storeu_si128(out.0.as_mut_ptr() as *mut __m128i, r);
-            out
+            unsafe {
+                let a_val = _mm_loadu_si128(a.0.as_ptr() as *const __m128i);
+                let b_val = _mm_loadu_si128(b.0.as_ptr() as *const __m128i);
+                let r = _mm_sub_epi32(a_val, b_val);
+                let mut out = U32x4::ZERO;
+                _mm_storeu_si128(out.0.as_mut_ptr() as *mut __m128i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -1661,12 +1776,14 @@ impl std::ops::Sub for U32x4 {
         unsafe fn sub_neon(a: &U32x4, b: &U32x4) -> U32x4 {
             use std::arch::aarch64::*;
             
-            let a_val = vld1q_u32(a.0.as_ptr());
-            let b_val = vld1q_u32(b.0.as_ptr());
-            let r = vsubq_u32(a_val, b_val);
-            let mut out = U32x4::ZERO;
-            vst1q_u32(out.0.as_mut_ptr(), r);
-            out
+            unsafe {
+                let a_val = vld1q_u32(a.0.as_ptr());
+                let b_val = vld1q_u32(b.0.as_ptr());
+                let r = vsubq_u32(a_val, b_val);
+                let mut out = U32x4::ZERO;
+                vst1q_u32(out.0.as_mut_ptr(), r);
+                out
+            }
         }
 
         cfg_if! {
@@ -1713,12 +1830,14 @@ impl std::ops::BitAnd for U32x4 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm_loadu_si128(a.0.as_ptr() as *const __m128i);
-            let b_val = _mm_loadu_si128(b.0.as_ptr() as *const __m128i);
-            let r = _mm_and_si128(a_val, b_val);
-            let mut out = U32x4::ZERO;
-            _mm_storeu_si128(out.0.as_mut_ptr() as *mut __m128i, r);
-            out
+            unsafe {
+                let a_val = _mm_loadu_si128(a.0.as_ptr() as *const __m128i);
+                let b_val = _mm_loadu_si128(b.0.as_ptr() as *const __m128i);
+                let r = _mm_and_si128(a_val, b_val);
+                let mut out = U32x4::ZERO;
+                _mm_storeu_si128(out.0.as_mut_ptr() as *mut __m128i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -1727,12 +1846,14 @@ impl std::ops::BitAnd for U32x4 {
         unsafe fn bitand_neon(a: &U32x4, b: &U32x4) -> U32x4 {
             use std::arch::aarch64::*;
             
-            let a_val = vld1q_u32(a.0.as_ptr());
-            let b_val = vld1q_u32(b.0.as_ptr());
-            let r = vandq_u32(a_val, b_val);
-            let mut out = U32x4::ZERO;
-            vst1q_u32(out.0.as_mut_ptr(), r);
-            out
+            unsafe {
+                let a_val = vld1q_u32(a.0.as_ptr());
+                let b_val = vld1q_u32(b.0.as_ptr());
+                let r = vandq_u32(a_val, b_val);
+                let mut out = U32x4::ZERO;
+                vst1q_u32(out.0.as_mut_ptr(), r);
+                out
+            }
         }
 
         cfg_if! {
@@ -1781,6 +1902,7 @@ impl U32x8 {
     }
 
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn broadcast(v: u32) -> Self {
         Self([v, v, v, v, v, v, v, v])
     }
@@ -1791,6 +1913,7 @@ impl U32x8 {
     }
 
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn from_array(arr: [u32; 8]) -> Self {
         Self(arr)
     }
@@ -1806,12 +1929,14 @@ impl U32x8 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let r = _mm256_cmpeq_epi32(a_val, b_val);
-            let mut out = U32x8::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let r = _mm256_cmpeq_epi32(a_val, b_val);
+                let mut out = U32x8::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -1820,16 +1945,18 @@ impl U32x8 {
         unsafe fn cmp_eq_neon(a: &U32x8, b: &U32x8) -> U32x8 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_u32(a.0.as_ptr());
-            let a1 = vld1q_u32(a.0.as_ptr().add(4));
-            let b0 = vld1q_u32(b.0.as_ptr());
-            let b1 = vld1q_u32(b.0.as_ptr().add(4));
-            let r0 = vceqq_u32(a0, b0);
-            let r1 = vceqq_u32(a1, b1);
-            let mut out = U32x8::ZERO;
-            vst1q_u32(out.0.as_mut_ptr(), r0);
-            vst1q_u32(out.0.as_mut_ptr().add(4), r1);
-            out
+            unsafe {
+                let a0 = vld1q_u32(a.0.as_ptr());
+                let a1 = vld1q_u32(a.0.as_ptr().add(4));
+                let b0 = vld1q_u32(b.0.as_ptr());
+                let b1 = vld1q_u32(b.0.as_ptr().add(4));
+                let r0 = vceqq_u32(a0, b0);
+                let r1 = vceqq_u32(a1, b1);
+                let mut out = U32x8::ZERO;
+                vst1q_u32(out.0.as_mut_ptr(), r0);
+                vst1q_u32(out.0.as_mut_ptr().add(4), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -1853,6 +1980,7 @@ impl U32x8 {
     }
 
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn movemask(self) -> u32 {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         #[target_feature(enable = "avx2")]
@@ -1863,9 +1991,11 @@ impl U32x8 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let a_ps = _mm256_castsi256_ps(a_val);
-            _mm256_movemask_ps(a_ps) as u32
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let a_ps = _mm256_castsi256_ps(a_val);
+                _mm256_movemask_ps(a_ps) as u32
+            }
         }
 
         cfg_if! {
@@ -1884,11 +2014,13 @@ impl U32x8 {
     }
 
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn any_nonzero(self) -> bool {
         self.0.iter().any(|&x| x != 0)
     }
 
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn cmp_lt(self, other: Self) -> Self {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         #[target_feature(enable = "avx2")]
@@ -1899,16 +2031,18 @@ impl U32x8 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            // For unsigned comparison, subtract 2^31 from both values
-            let sign_bit = _mm256_set1_epi32(i32::MIN);
-            let a_flipped = _mm256_xor_si256(a_val, sign_bit);
-            let b_flipped = _mm256_xor_si256(b_val, sign_bit);
-            let r = _mm256_cmpgt_epi32(b_flipped, a_flipped);
-            let mut out = U32x8::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                // For unsigned comparison, subtract 2^31 from both values
+                let sign_bit = _mm256_set1_epi32(i32::MIN);
+                let a_flipped = _mm256_xor_si256(a_val, sign_bit);
+                let b_flipped = _mm256_xor_si256(b_val, sign_bit);
+                let r = _mm256_cmpgt_epi32(b_flipped, a_flipped);
+                let mut out = U32x8::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -1917,16 +2051,18 @@ impl U32x8 {
         unsafe fn cmp_lt_neon(a: &U32x8, b: &U32x8) -> U32x8 {
             use std::arch::aarch64::*;
 
-            let a0 = vld1q_u32(a.0.as_ptr());
-            let a1 = vld1q_u32(a.0.as_ptr().add(4));
-            let b0 = vld1q_u32(b.0.as_ptr());
-            let b1 = vld1q_u32(b.0.as_ptr().add(4));
-            let r0 = vcltq_u32(a0, b0);
-            let r1 = vcltq_u32(a1, b1);
-            let mut out = U32x8::ZERO;
-            vst1q_u32(out.0.as_mut_ptr(), r0);
-            vst1q_u32(out.0.as_mut_ptr().add(4), r1);
-            out
+            unsafe {
+                let a0 = vld1q_u32(a.0.as_ptr());
+                let a1 = vld1q_u32(a.0.as_ptr().add(4));
+                let b0 = vld1q_u32(b.0.as_ptr());
+                let b1 = vld1q_u32(b.0.as_ptr().add(4));
+                let r0 = vcltq_u32(a0, b0);
+                let r1 = vcltq_u32(a1, b1);
+                let mut out = U32x8::ZERO;
+                vst1q_u32(out.0.as_mut_ptr(), r0);
+                vst1q_u32(out.0.as_mut_ptr().add(4), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -1950,6 +2086,7 @@ impl U32x8 {
     }
 
     #[inline(always)]
+    #[allow(dead_code)]
     pub fn blend(self, true_val: Self, false_val: Self) -> Self {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         #[target_feature(enable = "avx2")]
@@ -1960,13 +2097,15 @@ impl U32x8 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let mask_val = _mm256_loadu_si256(mask.0.as_ptr() as *const __m256i);
-            let true_val_vec = _mm256_loadu_si256(true_val.0.as_ptr() as *const __m256i);
-            let false_val_vec = _mm256_loadu_si256(false_val.0.as_ptr() as *const __m256i);
-            let r = _mm256_blendv_epi8(false_val_vec, true_val_vec, mask_val);
-            let mut out = U32x8::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let mask_val = _mm256_loadu_si256(mask.0.as_ptr() as *const __m256i);
+                let true_val_vec = _mm256_loadu_si256(true_val.0.as_ptr() as *const __m256i);
+                let false_val_vec = _mm256_loadu_si256(false_val.0.as_ptr() as *const __m256i);
+                let r = _mm256_blendv_epi8(false_val_vec, true_val_vec, mask_val);
+                let mut out = U32x8::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -1975,18 +2114,20 @@ impl U32x8 {
         unsafe fn blend_neon(mask: &U32x8, true_val: &U32x8, false_val: &U32x8) -> U32x8 {
             use std::arch::aarch64::*;
 
-            let mask0 = vld1q_u32(mask.0.as_ptr());
-            let mask1 = vld1q_u32(mask.0.as_ptr().add(4));
-            let true_val0 = vld1q_u32(true_val.0.as_ptr());
-            let true_val1 = vld1q_u32(true_val.0.as_ptr().add(4));
-            let false_val0 = vld1q_u32(false_val.0.as_ptr());
-            let false_val1 = vld1q_u32(false_val.0.as_ptr().add(4));
-            let r0 = vbslq_u32(mask0, true_val0, false_val0);
-            let r1 = vbslq_u32(mask1, true_val1, false_val1);
-            let mut out = U32x8::ZERO;
-            vst1q_u32(out.0.as_mut_ptr(), r0);
-            vst1q_u32(out.0.as_mut_ptr().add(4), r1);
-            out
+            unsafe {
+                let mask0 = vld1q_u32(mask.0.as_ptr());
+                let mask1 = vld1q_u32(mask.0.as_ptr().add(4));
+                let true_val0 = vld1q_u32(true_val.0.as_ptr());
+                let true_val1 = vld1q_u32(true_val.0.as_ptr().add(4));
+                let false_val0 = vld1q_u32(false_val.0.as_ptr());
+                let false_val1 = vld1q_u32(false_val.0.as_ptr().add(4));
+                let r0 = vbslq_u32(mask0, true_val0, false_val0);
+                let r1 = vbslq_u32(mask1, true_val1, false_val1);
+                let mut out = U32x8::ZERO;
+                vst1q_u32(out.0.as_mut_ptr(), r0);
+                vst1q_u32(out.0.as_mut_ptr().add(4), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -2023,12 +2164,14 @@ impl std::ops::Add for U32x8 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let r = _mm256_add_epi32(a_val, b_val);
-            let mut out = U32x8::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let r = _mm256_add_epi32(a_val, b_val);
+                let mut out = U32x8::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -2037,16 +2180,18 @@ impl std::ops::Add for U32x8 {
         unsafe fn add_neon(a: &U32x8, b: &U32x8) -> U32x8 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_u32(a.0.as_ptr());
-            let a1 = vld1q_u32(a.0.as_ptr().add(4));
-            let b0 = vld1q_u32(b.0.as_ptr());
-            let b1 = vld1q_u32(b.0.as_ptr().add(4));
-            let r0 = vaddq_u32(a0, b0);
-            let r1 = vaddq_u32(a1, b1);
-            let mut out = U32x8::ZERO;
-            vst1q_u32(out.0.as_mut_ptr(), r0);
-            vst1q_u32(out.0.as_mut_ptr().add(4), r1);
-            out
+            unsafe {
+                let a0 = vld1q_u32(a.0.as_ptr());
+                let a1 = vld1q_u32(a.0.as_ptr().add(4));
+                let b0 = vld1q_u32(b.0.as_ptr());
+                let b1 = vld1q_u32(b.0.as_ptr().add(4));
+                let r0 = vaddq_u32(a0, b0);
+                let r1 = vaddq_u32(a1, b1);
+                let mut out = U32x8::ZERO;
+                vst1q_u32(out.0.as_mut_ptr(), r0);
+                vst1q_u32(out.0.as_mut_ptr().add(4), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -2083,12 +2228,14 @@ impl std::ops::Sub for U32x8 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let r = _mm256_sub_epi32(a_val, b_val);
-            let mut out = U32x8::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let r = _mm256_sub_epi32(a_val, b_val);
+                let mut out = U32x8::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -2097,16 +2244,18 @@ impl std::ops::Sub for U32x8 {
         unsafe fn sub_neon(a: &U32x8, b: &U32x8) -> U32x8 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_u32(a.0.as_ptr());
-            let a1 = vld1q_u32(a.0.as_ptr().add(4));
-            let b0 = vld1q_u32(b.0.as_ptr());
-            let b1 = vld1q_u32(b.0.as_ptr().add(4));
-            let r0 = vsubq_u32(a0, b0);
-            let r1 = vsubq_u32(a1, b1);
-            let mut out = U32x8::ZERO;
-            vst1q_u32(out.0.as_mut_ptr(), r0);
-            vst1q_u32(out.0.as_mut_ptr().add(4), r1);
-            out
+            unsafe {
+                let a0 = vld1q_u32(a.0.as_ptr());
+                let a1 = vld1q_u32(a.0.as_ptr().add(4));
+                let b0 = vld1q_u32(b.0.as_ptr());
+                let b1 = vld1q_u32(b.0.as_ptr().add(4));
+                let r0 = vsubq_u32(a0, b0);
+                let r1 = vsubq_u32(a1, b1);
+                let mut out = U32x8::ZERO;
+                vst1q_u32(out.0.as_mut_ptr(), r0);
+                vst1q_u32(out.0.as_mut_ptr().add(4), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -2161,12 +2310,14 @@ impl std::ops::BitAnd for U32x8 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let r = _mm256_and_si256(a_val, b_val);
-            let mut out = U32x8::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let r = _mm256_and_si256(a_val, b_val);
+                let mut out = U32x8::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -2175,16 +2326,18 @@ impl std::ops::BitAnd for U32x8 {
         unsafe fn bitand_neon(a: &U32x8, b: &U32x8) -> U32x8 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_u32(a.0.as_ptr());
-            let a1 = vld1q_u32(a.0.as_ptr().add(4));
-            let b0 = vld1q_u32(b.0.as_ptr());
-            let b1 = vld1q_u32(b.0.as_ptr().add(4));
-            let r0 = vandq_u32(a0, b0);
-            let r1 = vandq_u32(a1, b1);
-            let mut out = U32x8::ZERO;
-            vst1q_u32(out.0.as_mut_ptr(), r0);
-            vst1q_u32(out.0.as_mut_ptr().add(4), r1);
-            out
+            unsafe {
+                let a0 = vld1q_u32(a.0.as_ptr());
+                let a1 = vld1q_u32(a.0.as_ptr().add(4));
+                let b0 = vld1q_u32(b.0.as_ptr());
+                let b1 = vld1q_u32(b.0.as_ptr().add(4));
+                let r0 = vandq_u32(a0, b0);
+                let r1 = vandq_u32(a1, b1);
+                let mut out = U32x8::ZERO;
+                vst1q_u32(out.0.as_mut_ptr(), r0);
+                vst1q_u32(out.0.as_mut_ptr().add(4), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -2221,12 +2374,14 @@ impl std::ops::BitOr for U32x8 {
             #[cfg(target_arch = "x86")]
             use std::arch::x86::*;
 
-            let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-            let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-            let r = _mm256_or_si256(a_val, b_val);
-            let mut out = U32x8::ZERO;
-            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-            out
+            unsafe {
+                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
+                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
+                let r = _mm256_or_si256(a_val, b_val);
+                let mut out = U32x8::ZERO;
+                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
+                out
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -2235,16 +2390,18 @@ impl std::ops::BitOr for U32x8 {
         unsafe fn bitor_neon(a: &U32x8, b: &U32x8) -> U32x8 {
             use std::arch::aarch64::*;
             
-            let a0 = vld1q_u32(a.0.as_ptr());
-            let a1 = vld1q_u32(a.0.as_ptr().add(4));
-            let b0 = vld1q_u32(b.0.as_ptr());
-            let b1 = vld1q_u32(b.0.as_ptr().add(4));
-            let r0 = vorrq_u32(a0, b0);
-            let r1 = vorrq_u32(a1, b1);
-            let mut out = U32x8::ZERO;
-            vst1q_u32(out.0.as_mut_ptr(), r0);
-            vst1q_u32(out.0.as_mut_ptr().add(4), r1);
-            out
+            unsafe {
+                let a0 = vld1q_u32(a.0.as_ptr());
+                let a1 = vld1q_u32(a.0.as_ptr().add(4));
+                let b0 = vld1q_u32(b.0.as_ptr());
+                let b1 = vld1q_u32(b.0.as_ptr().add(4));
+                let r0 = vorrq_u32(a0, b0);
+                let r1 = vorrq_u32(a1, b1);
+                let mut out = U32x8::ZERO;
+                vst1q_u32(out.0.as_mut_ptr(), r0);
+                vst1q_u32(out.0.as_mut_ptr().add(4), r1);
+                out
+            }
         }
 
         cfg_if! {
@@ -2279,6 +2436,7 @@ impl From<[u32; 8]> for U32x8 {
 // CmpGt trait for wide compatibility
 // ============================================================================
 
+#[allow(dead_code)]
 pub trait CmpGt<Rhs = Self> {
     type Output;
     fn cmp_gt(self, other: Rhs) -> Self::Output;
