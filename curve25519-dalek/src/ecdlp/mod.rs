@@ -1226,443 +1226,6 @@ fn fast_ecdlp_simd(
         }
     }
 
-    #[inline(always)]
-    fn batch_square_4way_inline(a_batch: &[FieldElement; 4]) -> [FieldElement; 4] {
-        cfg_if! {
-            if #[cfg(all(curve25519_dalek_bits = "64", target_feature = "avx2"))] {
-                // Reuse the U64x4 type and helpers from batch_mul_4way_inline
-                #[repr(C, align(32))]
-                #[derive(Clone, Copy)]
-                struct U64x4([u64; 4]);
-
-                impl U64x4 {
-                    #[inline(always)]
-                    const fn new(arr: [u64; 4]) -> Self { Self(arr) }
-                    #[inline(always)]
-                    fn to_array(self) -> [u64; 4] { self.0 }
-                }
-
-                impl std::ops::Add for U64x4 {
-                    type Output = Self;
-                    #[inline(always)]
-                    fn add(self, other: Self) -> Self {
-                        unsafe {
-                            use std::arch::x86_64::*;
-                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
-                            let b = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
-                            let r = _mm256_add_epi64(a, b);
-                            let mut out = Self([0; 4]);
-                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-                            out
-                        }
-                    }
-                }
-
-                impl std::ops::BitAnd for U64x4 {
-                    type Output = Self;
-                    #[inline(always)]
-                    fn bitand(self, other: Self) -> Self {
-                        unsafe {
-                            use std::arch::x86_64::*;
-                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
-                            let b = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
-                            let r = _mm256_and_si256(a, b);
-                            let mut out = Self([0; 4]);
-                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-                            out
-                        }
-                    }
-                }
-
-                impl std::ops::BitOr for U64x4 {
-                    type Output = Self;
-                    #[inline(always)]
-                    fn bitor(self, other: Self) -> Self {
-                        unsafe {
-                            use std::arch::x86_64::*;
-                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
-                            let b = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
-                            let r = _mm256_or_si256(a, b);
-                            let mut out = Self([0; 4]);
-                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-                            out
-                        }
-                    }
-                }
-
-                impl std::ops::Shr<i32> for U64x4 {
-                    type Output = Self;
-                    #[inline(always)]
-                    fn shr(self, amt: i32) -> Self {
-                        unsafe {
-                            use std::arch::x86_64::*;
-                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
-                            let shift = _mm256_set1_epi64x(amt as i64);
-                            let r = _mm256_srlv_epi64(a, shift);
-                            let mut out = Self([0; 4]);
-                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-                            out
-                        }
-                    }
-                }
-
-                // Just square each element using the existing batch_mul logic
-                batch_mul_4way_inline(a_batch, a_batch)
-            } else {
-                [
-                    a_batch[0].square(),
-                    a_batch[1].square(),
-                    a_batch[2].square(),
-                    a_batch[3].square(),
-                ]
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn batch_mul_4way_inline(a_batch: &[FieldElement; 4], b_batch: &[FieldElement; 4]) -> [FieldElement; 4] {
-        cfg_if! {
-            if #[cfg(all(curve25519_dalek_bits = "64", target_feature = "avx2"))] {
-                // AVX2 path - will be TRUE in the AVX2 variant
-                #[repr(C, align(32))]
-                #[derive(Clone, Copy)]
-                struct U64x4([u64; 4]);
-
-                impl U64x4 {
-                    #[inline(always)]
-                    const fn new(arr: [u64; 4]) -> Self { Self(arr) }
-
-                    #[inline(always)]
-                    fn splat(v: u64) -> Self { Self([v, v, v, v]) }
-
-                    #[inline(always)]
-                    fn to_array(self) -> [u64; 4] { self.0 }
-
-                    #[inline(always)]
-                    fn cmp_lt(self, other: Self) -> Self {
-                        unsafe {
-                            use std::arch::x86_64::*;
-                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
-                            let b = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
-                            let sign_bit = _mm256_set1_epi64x(i64::MIN);
-                            let a_flipped = _mm256_xor_si256(a, sign_bit);
-                            let b_flipped = _mm256_xor_si256(b, sign_bit);
-                            let r = _mm256_cmpgt_epi64(b_flipped, a_flipped);
-                            let mut out = Self([0; 4]);
-                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-                            out
-                        }
-                    }
-
-                    #[inline(always)]
-                    fn blend(self, if_true: Self, mask: Self) -> Self {
-                        unsafe {
-                            use std::arch::x86_64::*;
-                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
-                            let b = _mm256_loadu_si256(if_true.0.as_ptr() as *const __m256i);
-                            let m = _mm256_loadu_si256(mask.0.as_ptr() as *const __m256i);
-                            let r = _mm256_blendv_epi8(a, b, m);
-                            let mut out = Self([0; 4]);
-                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-                            out
-                        }
-                    }
-                }
-
-                impl std::ops::Add for U64x4 {
-                    type Output = Self;
-                    #[inline(always)]
-                    fn add(self, other: Self) -> Self {
-                        unsafe {
-                            use std::arch::x86_64::*;
-                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
-                            let b = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
-                            let r = _mm256_add_epi64(a, b);
-                            let mut out = Self([0; 4]);
-                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-                            out
-                        }
-                    }
-                }
-
-                impl std::ops::Sub for U64x4 {
-                    type Output = Self;
-                    #[inline(always)]
-                    fn sub(self, other: Self) -> Self {
-                        unsafe {
-                            use std::arch::x86_64::*;
-                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
-                            let b = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
-                            let r = _mm256_sub_epi64(a, b);
-                            let mut out = Self([0; 4]);
-                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-                            out
-                        }
-                    }
-                }
-
-                impl std::ops::Mul for U64x4 {
-                    type Output = Self;
-                    #[inline(always)]
-                    fn mul(self, other: Self) -> Self {
-                        unsafe {
-                            use std::arch::x86_64::*;
-                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
-                            let b = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
-                            let a_hi = _mm256_srli_epi64(a, 32);
-                            let b_hi = _mm256_srli_epi64(b, 32);
-                            let lo_lo = _mm256_mul_epu32(a, b);
-                            let lo_hi = _mm256_mul_epu32(a, b_hi);
-                            let hi_lo = _mm256_mul_epu32(a_hi, b);
-                            let mid = _mm256_add_epi64(lo_hi, hi_lo);
-                            let mid_shifted = _mm256_slli_epi64(mid, 32);
-                            let r = _mm256_add_epi64(lo_lo, mid_shifted);
-                            let mut out = Self([0; 4]);
-                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-                            out
-                        }
-                    }
-                }
-
-                impl std::ops::BitAnd for U64x4 {
-                    type Output = Self;
-                    #[inline(always)]
-                    fn bitand(self, other: Self) -> Self {
-                        unsafe {
-                            use std::arch::x86_64::*;
-                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
-                            let b = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
-                            let r = _mm256_and_si256(a, b);
-                            let mut out = Self([0; 4]);
-                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-                            out
-                        }
-                    }
-                }
-
-                impl std::ops::BitOr for U64x4 {
-                    type Output = Self;
-                    #[inline(always)]
-                    fn bitor(self, other: Self) -> Self {
-                        unsafe {
-                            use std::arch::x86_64::*;
-                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
-                            let b = _mm256_loadu_si256(other.0.as_ptr() as *const __m256i);
-                            let r = _mm256_or_si256(a, b);
-                            let mut out = Self([0; 4]);
-                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-                            out
-                        }
-                    }
-                }
-
-                impl std::ops::Shr<i32> for U64x4 {
-                    type Output = Self;
-                    #[inline(always)]
-                    fn shr(self, amt: i32) -> Self {
-                        unsafe {
-                            use std::arch::x86_64::*;
-                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
-                            let shift = _mm256_set1_epi64x(amt as i64);
-                            let r = _mm256_srlv_epi64(a, shift);
-                            let mut out = Self([0; 4]);
-                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-                            out
-                        }
-                    }
-                }
-
-                impl std::ops::Shl<i32> for U64x4 {
-                    type Output = Self;
-                    #[inline(always)]
-                    fn shl(self, amt: i32) -> Self {
-                        unsafe {
-                            use std::arch::x86_64::*;
-                            let a = _mm256_loadu_si256(self.0.as_ptr() as *const __m256i);
-                            let shift = _mm256_set1_epi64x(amt as i64);
-                            let r = _mm256_sllv_epi64(a, shift);
-                            let mut out = Self([0; 4]);
-                            _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-                            out
-                        }
-                    }
-                }
-
-                // Now the actual batch_mul implementation using our local SIMD types
-                const LOW_51: u64 = (1 << 51) - 1;
-                const MASK: U64x4 = U64x4([LOW_51, LOW_51, LOW_51, LOW_51]);
-                const FACTOR_19: U64x4 = U64x4([19, 19, 19, 19]);
-                const MASK_32: U64x4 = U64x4([0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF]);
-
-                #[inline(always)]
-                fn mul64_to_128_simd(a: U64x4, b: U64x4) -> (U64x4, U64x4) {
-                    let a_lo = a & MASK_32;
-                    let a_hi = a >> 32;
-                    let b_lo = b & MASK_32;
-                    let b_hi = b >> 32;
-
-                    let lo_lo = a_lo * b_lo;
-                    let lo_hi = a_lo * b_hi;
-                    let hi_lo = a_hi * b_lo;
-                    let hi_hi = a_hi * b_hi;
-
-                    let mid = lo_hi + hi_lo;
-                    let mid_lo = mid << 32;
-                    let mid_hi = mid >> 32;
-
-                    let res_lo = lo_lo + mid_lo;
-                    let carry = res_lo.cmp_lt(lo_lo).blend(U64x4::splat(1), U64x4::splat(0));
-                    let res_hi = hi_hi + mid_hi + carry;
-
-                    (res_lo, res_hi)
-                }
-
-                #[inline(always)]
-                fn add_128_simd(a_lo: U64x4, a_hi: U64x4, b_lo: U64x4, b_hi: U64x4) -> (U64x4, U64x4) {
-                    let sum_lo = a_lo + b_lo;
-                    let carry = sum_lo.cmp_lt(a_lo).blend(U64x4::splat(1), U64x4::splat(0));
-                    let sum_hi = a_hi + b_hi + carry;
-                    (sum_lo, sum_hi)
-                }
-
-                let mut a = [U64x4::new([0; 4]); 5];
-                let mut b = [U64x4::new([0; 4]); 5];
-
-                for i in 0..5 {
-                    a[i] = U64x4::new([
-                        a_batch[0].0[i], a_batch[1].0[i],
-                        a_batch[2].0[i], a_batch[3].0[i]
-                    ]);
-                    b[i] = U64x4::new([
-                        b_batch[0].0[i], b_batch[1].0[i],
-                        b_batch[2].0[i], b_batch[3].0[i]
-                    ]);
-                }
-
-                let b1_19 = b[1] * FACTOR_19;
-                let b2_19 = b[2] * FACTOR_19;
-                let b3_19 = b[3] * FACTOR_19;
-                let b4_19 = b[4] * FACTOR_19;
-
-                let a0_b0 = mul64_to_128_simd(a[0], b[0]);
-                let a0_b1 = mul64_to_128_simd(a[0], b[1]);
-                let a0_b2 = mul64_to_128_simd(a[0], b[2]);
-                let a0_b3 = mul64_to_128_simd(a[0], b[3]);
-                let a0_b4 = mul64_to_128_simd(a[0], b[4]);
-
-                let a1_b0 = mul64_to_128_simd(a[1], b[0]);
-                let a1_b1 = mul64_to_128_simd(a[1], b[1]);
-                let a1_b2 = mul64_to_128_simd(a[1], b[2]);
-                let a1_b3 = mul64_to_128_simd(a[1], b[3]);
-                let a1_b4_19 = mul64_to_128_simd(a[1], b4_19);
-
-                let a2_b0 = mul64_to_128_simd(a[2], b[0]);
-                let a2_b1 = mul64_to_128_simd(a[2], b[1]);
-                let a2_b2 = mul64_to_128_simd(a[2], b[2]);
-                let a2_b3_19 = mul64_to_128_simd(a[2], b3_19);
-                let a2_b4_19 = mul64_to_128_simd(a[2], b4_19);
-
-                let a3_b0 = mul64_to_128_simd(a[3], b[0]);
-                let a3_b1 = mul64_to_128_simd(a[3], b[1]);
-                let a3_b2_19 = mul64_to_128_simd(a[3], b2_19);
-                let a3_b3_19 = mul64_to_128_simd(a[3], b3_19);
-                let a3_b4_19 = mul64_to_128_simd(a[3], b4_19);
-
-                let a4_b0 = mul64_to_128_simd(a[4], b[0]);
-                let a4_b1_19 = mul64_to_128_simd(a[4], b1_19);
-                let a4_b2_19 = mul64_to_128_simd(a[4], b2_19);
-                let a4_b3_19 = mul64_to_128_simd(a[4], b3_19);
-                let a4_b4_19 = mul64_to_128_simd(a[4], b4_19);
-
-                let (c0_lo, c0_hi) = {
-                    let (lo, hi) = a0_b0;
-                    let (lo, hi) = add_128_simd(lo, hi, a4_b1_19.0, a4_b1_19.1);
-                    let (lo, hi) = add_128_simd(lo, hi, a3_b2_19.0, a3_b2_19.1);
-                    let (lo, hi) = add_128_simd(lo, hi, a2_b3_19.0, a2_b3_19.1);
-                    add_128_simd(lo, hi, a1_b4_19.0, a1_b4_19.1)
-                };
-
-                let (c1_lo, c1_hi) = {
-                    let (lo, hi) = a1_b0;
-                    let (lo, hi) = add_128_simd(lo, hi, a0_b1.0, a0_b1.1);
-                    let (lo, hi) = add_128_simd(lo, hi, a4_b2_19.0, a4_b2_19.1);
-                    let (lo, hi) = add_128_simd(lo, hi, a3_b3_19.0, a3_b3_19.1);
-                    add_128_simd(lo, hi, a2_b4_19.0, a2_b4_19.1)
-                };
-
-                let (c2_lo, c2_hi) = {
-                    let (lo, hi) = a2_b0;
-                    let (lo, hi) = add_128_simd(lo, hi, a1_b1.0, a1_b1.1);
-                    let (lo, hi) = add_128_simd(lo, hi, a0_b2.0, a0_b2.1);
-                    let (lo, hi) = add_128_simd(lo, hi, a4_b3_19.0, a4_b3_19.1);
-                    add_128_simd(lo, hi, a3_b4_19.0, a3_b4_19.1)
-                };
-
-                let (c3_lo, c3_hi) = {
-                    let (lo, hi) = a3_b0;
-                    let (lo, hi) = add_128_simd(lo, hi, a2_b1.0, a2_b1.1);
-                    let (lo, hi) = add_128_simd(lo, hi, a1_b2.0, a1_b2.1);
-                    let (lo, hi) = add_128_simd(lo, hi, a0_b3.0, a0_b3.1);
-                    add_128_simd(lo, hi, a4_b4_19.0, a4_b4_19.1)
-                };
-
-                let (c4_lo, c4_hi) = {
-                    let (lo, hi) = a4_b0;
-                    let (lo, hi) = add_128_simd(lo, hi, a3_b1.0, a3_b1.1);
-                    let (lo, hi) = add_128_simd(lo, hi, a2_b2.0, a2_b2.1);
-                    let (lo, hi) = add_128_simd(lo, hi, a1_b3.0, a1_b3.1);
-                    add_128_simd(lo, hi, a0_b4.0, a0_b4.1)
-                };
-
-                let mut limb0 = c0_lo & MASK;
-                let mut carry = (c0_hi << 13) | (c0_lo >> 51);
-
-                macro_rules! propagate_carry {
-                    ($c_lo:expr, $c_hi:expr) => {{
-                        let acc = $c_lo + carry;
-                        let limb = acc & MASK;
-                        let overflow_mask = acc.cmp_lt($c_lo);
-                        let correction = overflow_mask.blend(U64x4::splat(1 << 13), U64x4::splat(0));
-                        carry = ($c_hi << 13) | (acc >> 51) + correction;
-                        limb
-                    }};
-                }
-
-                let limb1 = propagate_carry!(c1_lo, c1_hi);
-                let limb2 = propagate_carry!(c2_lo, c2_hi);
-                let limb3 = propagate_carry!(c3_lo, c3_hi);
-                let limb4 = propagate_carry!(c4_lo, c4_hi);
-
-                limb0 = limb0 + carry * FACTOR_19;
-                let carry5 = limb0 >> 51;
-                limb0 = limb0 & MASK;
-                let limb1 = limb1 + carry5;
-
-                let limb0_arr = limb0.to_array();
-                let limb1_arr = limb1.to_array();
-                let limb2_arr = limb2.to_array();
-                let limb3_arr = limb3.to_array();
-                let limb4_arr = limb4.to_array();
-
-                [
-                    FieldElement::from_limbs([limb0_arr[0], limb1_arr[0], limb2_arr[0], limb3_arr[0], limb4_arr[0]]),
-                    FieldElement::from_limbs([limb0_arr[1], limb1_arr[1], limb2_arr[1], limb3_arr[1], limb4_arr[1]]),
-                    FieldElement::from_limbs([limb0_arr[2], limb1_arr[2], limb2_arr[2], limb3_arr[2], limb4_arr[2]]),
-                    FieldElement::from_limbs([limb0_arr[3], limb1_arr[3], limb2_arr[3], limb3_arr[3], limb4_arr[3]]),
-                ]
-            } else {
-                // Scalar fallback
-                [
-                    &a_batch[0] * &b_batch[0],
-                    &a_batch[1] * &b_batch[1],
-                    &a_batch[2] * &b_batch[2],
-                    &a_batch[3] * &b_batch[3],
-                ]
-            }
-        }
-    }
-
-
     let t1_table = precomputed_tables.get_t1();
 
     let mut found = None;
@@ -2131,11 +1694,19 @@ mod tests {
             &self,
             queries: &[[u8; 32]; 4],
         ) -> [(bool, u64); 4] {
-            use std::arch::x86_64::*;
-            
-            unsafe {
+            #[cfg(target_arch = "x86_64")]
+            #[target_feature(enable = "sse4.1")]
+            #[inline]
+            unsafe fn lookup_batch_4_sse(
+                keys_slice: &[u32],
+                values_slice: &[u32],
+                cuckoo_len: usize,
+                queries: &[[u8; 32]; 4],
+            ) -> [(bool, u64); 4] {
+                use std::arch::x86_64::*;
+                
                 let mut results = [(false, 0u64); 4];
-                let cuckoo_len = self.cuckoo_len as u32;
+                let cuckoo_len = cuckoo_len as u32;
                 
                 // Process each cuckoo position
                 for i in 0..CUCKOO_K {
@@ -2178,10 +1749,10 @@ mod tests {
                     let idx3 = _mm_extract_epi32(indices, 3) as usize;
                     
                     let table_keys = _mm_setr_epi32(
-                        self.keys[idx0] as i32,
-                        self.keys[idx1] as i32,
-                        self.keys[idx2] as i32,
-                        self.keys[idx3] as i32,
+                        keys_slice[idx0] as i32,
+                        keys_slice[idx1] as i32,
+                        keys_slice[idx2] as i32,
+                        keys_slice[idx3] as i32,
                     );
                     
                     // Compare keys
@@ -2190,20 +1761,122 @@ mod tests {
                     
                     // Extract values for matches
                     if match_mask & 0x1 != 0 && !results[0].0 {
-                        results[0] = (true, self.values[idx0] as u64);
+                        results[0] = (true, values_slice[idx0] as u64);
                     }
                     if match_mask & 0x2 != 0 && !results[1].0 {
-                        results[1] = (true, self.values[idx1] as u64);
+                        results[1] = (true, values_slice[idx1] as u64);
                     }
                     if match_mask & 0x4 != 0 && !results[2].0 {
-                        results[2] = (true, self.values[idx2] as u64);
+                        results[2] = (true, values_slice[idx2] as u64);
                     }
                     if match_mask & 0x8 != 0 && !results[3].0 {
-                        results[3] = (true, self.values[idx3] as u64);
+                        results[3] = (true, values_slice[idx3] as u64);
                     }
                 }
                 
                 results
+            }
+            
+            #[cfg(target_arch = "aarch64")]
+            #[target_feature(enable = "neon")]
+            #[inline]
+            unsafe fn lookup_batch_4_neon(
+                keys_slice: &[u32],
+                values_slice: &[u32],
+                cuckoo_len: usize,
+                queries: &[[u8; 32]; 4],
+            ) -> [(bool, u64); 4] {
+                use std::arch::aarch64::*;
+                
+                let mut results = [(false, 0u64); 4];
+                let cuckoo_len = cuckoo_len as u32;
+                
+                // Process each cuckoo position
+                for i in 0..CUCKOO_K {
+                    let start = i * 8;
+                    let key_offset = start + 4;
+                    
+                    // Extract keys and hashes for all 4 queries (scalar for now)
+                    let mut keys_array = [0u32; 4];
+                    let mut hashes_array = [0u32; 4];
+                    
+                    for j in 0..4 {
+                        keys_array[j] = u32::from_be_bytes(queries[j][key_offset..key_offset + 4].try_into().unwrap());
+                        hashes_array[j] = u32::from_be_bytes(queries[j][start..start + 4].try_into().unwrap());
+                    }
+                    
+                    let keys = vld1q_u32(keys_array.as_ptr());
+                    let hashes = vld1q_u32(hashes_array.as_ptr());
+                    
+                    // Compute indices (modulo operation)
+                    let mut indices_array = [0u32; 4];
+                    if cuckoo_len.is_power_of_two() {
+                        let mask = vdupq_n_u32(cuckoo_len - 1);
+                        let indices = vandq_u32(hashes, mask);
+                        vst1q_u32(indices_array.as_mut_ptr(), indices);
+                    } else {
+                        // Fallback to scalar modulo for non-power-of-2
+                        vst1q_u32(hashes_array.as_mut_ptr(), hashes);
+                        for j in 0..4 {
+                            indices_array[j] = hashes_array[j] % cuckoo_len;
+                        }
+                    }
+                    
+                    // Gather table keys (scalar - NEON doesn't have gather)
+                    let mut table_keys_array = [0u32; 4];
+                    for j in 0..4 {
+                        table_keys_array[j] = keys_slice[indices_array[j] as usize];
+                    }
+                    let table_keys = vld1q_u32(table_keys_array.as_ptr());
+                    
+                    // Compare keys
+                    let matches = vceqq_u32(keys, table_keys);
+                    
+                    // Extract match mask (scalar extraction)
+                    let mut matches_array = [0u32; 4];
+                    vst1q_u32(matches_array.as_mut_ptr(), matches);
+                    
+                    // Extract values for matches
+                    for j in 0..4 {
+                        if matches_array[j] != 0 && !results[j].0 {
+                            results[j] = (true, values_slice[indices_array[j] as usize] as u64);
+                        }
+                    }
+                }
+                
+                results
+            }
+            
+            cfg_if::cfg_if! {
+                if #[cfg(target_arch = "x86_64")] {
+                    unsafe { lookup_batch_4_sse(self.keys, self.values, self.cuckoo_len, queries) }
+                } else if #[cfg(target_arch = "aarch64")] {
+                    unsafe { lookup_batch_4_neon(self.keys, self.values, self.cuckoo_len, queries) }
+                } else {
+                    // Scalar fallback
+                    let mut results = [(false, 0u64); 4];
+                    let cuckoo_len = self.cuckoo_len as u32;
+                    
+                    for i in 0..CUCKOO_K {
+                        let start = i * 8;
+                        let key_offset = start + 4;
+                        
+                        for (query_idx, query) in queries.iter().enumerate() {
+                            if results[query_idx].0 {
+                                continue; // Already found
+                            }
+                            
+                            let key = u32::from_be_bytes(query[key_offset..key_offset + 4].try_into().unwrap());
+                            let hash = u32::from_be_bytes(query[start..start + 4].try_into().unwrap());
+                            let idx = (hash % cuckoo_len) as usize;
+                            
+                            if self.keys[idx] == key {
+                                results[query_idx] = (true, self.values[idx] as u64);
+                            }
+                        }
+                    }
+                    results
+                }
             }
         }
     }
