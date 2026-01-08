@@ -12,6 +12,7 @@ use cfg_if::cfg_if;
 #[repr(C, align(32))]
 pub struct U64x4(pub [u64; 4]);
 
+#[allow(dead_code)]
 impl U64x4 {
     pub const ZERO: Self = Self([0; 4]);
 
@@ -26,7 +27,6 @@ impl U64x4 {
     }
 
     #[inline(always)]
-    #[allow(dead_code)]
     pub fn broadcast(v: u64) -> Self {
         Self([v, v, v, v])
     }
@@ -102,7 +102,6 @@ impl U64x4 {
     }
 
     #[inline(always)]
-    #[allow(dead_code)]
     pub fn cmp_eq(self, other: Self) -> Self {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         #[target_feature(enable = "avx2")]
@@ -1497,6 +1496,7 @@ impl From<[i64; 4]> for I64x4 {
 #[repr(C, align(16))]
 pub struct U32x4(pub [u32; 4]);
 
+#[allow(dead_code)]
 impl U32x4 {
     pub const ZERO: Self = Self([0; 4]);
 
@@ -1888,6 +1888,7 @@ impl From<[u32; 4]> for U32x4 {
 #[repr(C, align(32))]
 pub struct U32x8(pub [u32; 8]);
 
+#[allow(dead_code)]
 impl U32x8 {
     pub const ZERO: Self = Self([0; 8]);
 
@@ -1902,7 +1903,6 @@ impl U32x8 {
     }
 
     #[inline(always)]
-    #[allow(dead_code)]
     pub fn broadcast(v: u32) -> Self {
         Self([v, v, v, v, v, v, v, v])
     }
@@ -1913,7 +1913,6 @@ impl U32x8 {
     }
 
     #[inline(always)]
-    #[allow(dead_code)]
     pub fn from_array(arr: [u32; 8]) -> Self {
         Self(arr)
     }
@@ -1980,7 +1979,6 @@ impl U32x8 {
     }
 
     #[inline(always)]
-    #[allow(dead_code)]
     pub fn movemask(self) -> u32 {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         #[target_feature(enable = "avx2")]
@@ -2014,79 +2012,11 @@ impl U32x8 {
     }
 
     #[inline(always)]
-    #[allow(dead_code)]
     pub fn any_nonzero(self) -> bool {
         self.0.iter().any(|&x| x != 0)
     }
 
     #[inline(always)]
-    #[allow(dead_code)]
-    pub fn cmp_lt(self, other: Self) -> Self {
-        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        #[target_feature(enable = "avx2")]
-        #[inline]
-        unsafe fn cmp_lt_avx2(a: &U32x8, b: &U32x8) -> U32x8 {
-            #[cfg(target_arch = "x86_64")]
-            use std::arch::x86_64::*;
-            #[cfg(target_arch = "x86")]
-            use std::arch::x86::*;
-
-            unsafe {
-                let a_val = _mm256_loadu_si256(a.0.as_ptr() as *const __m256i);
-                let b_val = _mm256_loadu_si256(b.0.as_ptr() as *const __m256i);
-                // For unsigned comparison, subtract 2^31 from both values
-                let sign_bit = _mm256_set1_epi32(i32::MIN);
-                let a_flipped = _mm256_xor_si256(a_val, sign_bit);
-                let b_flipped = _mm256_xor_si256(b_val, sign_bit);
-                let r = _mm256_cmpgt_epi32(b_flipped, a_flipped);
-                let mut out = U32x8::ZERO;
-                _mm256_storeu_si256(out.0.as_mut_ptr() as *mut __m256i, r);
-                out
-            }
-        }
-
-        #[cfg(target_arch = "aarch64")]
-        #[target_feature(enable = "neon")]
-        #[inline]
-        unsafe fn cmp_lt_neon(a: &U32x8, b: &U32x8) -> U32x8 {
-            use std::arch::aarch64::*;
-
-            unsafe {
-                let a0 = vld1q_u32(a.0.as_ptr());
-                let a1 = vld1q_u32(a.0.as_ptr().add(4));
-                let b0 = vld1q_u32(b.0.as_ptr());
-                let b1 = vld1q_u32(b.0.as_ptr().add(4));
-                let r0 = vcltq_u32(a0, b0);
-                let r1 = vcltq_u32(a1, b1);
-                let mut out = U32x8::ZERO;
-                vst1q_u32(out.0.as_mut_ptr(), r0);
-                vst1q_u32(out.0.as_mut_ptr().add(4), r1);
-                out
-            }
-        }
-
-        cfg_if! {
-            if #[cfg(any(target_arch = "x86", target_arch = "x86_64"))] {
-                unsafe { cmp_lt_avx2(&self, &other) }
-            } else if #[cfg(target_arch = "aarch64")] {
-                unsafe { cmp_lt_neon(&self, &other) }
-            } else {
-                Self([
-                    if self.0[0] < other.0[0] { u32::MAX } else { 0 },
-                    if self.0[1] < other.0[1] { u32::MAX } else { 0 },
-                    if self.0[2] < other.0[2] { u32::MAX } else { 0 },
-                    if self.0[3] < other.0[3] { u32::MAX } else { 0 },
-                    if self.0[4] < other.0[4] { u32::MAX } else { 0 },
-                    if self.0[5] < other.0[5] { u32::MAX } else { 0 },
-                    if self.0[6] < other.0[6] { u32::MAX } else { 0 },
-                    if self.0[7] < other.0[7] { u32::MAX } else { 0 },
-                ])
-            }
-        }
-    }
-
-    #[inline(always)]
-    #[allow(dead_code)]
     pub fn blend(self, true_val: Self, false_val: Self) -> Self {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         #[target_feature(enable = "avx2")]

@@ -63,6 +63,7 @@ fn batch_subtract_4way_vec_impl<B: SimdBackend>(
 
 // Generic 8-way batch subtraction
 #[inline(always)]
+#[allow(dead_code)]
 fn batch_subtract_8way_impl<B: SimdBackend>(
     batch: &[FieldElement; 8],
     target: &FieldElement,
@@ -115,6 +116,7 @@ fn batch_add_4way_impl<B: SimdBackend>(
 
 // Generic 8-way batch addition
 #[inline(always)]
+#[allow(dead_code)]
 fn batch_add_8way_impl<B: SimdBackend>(
     batch: &[FieldElement; 8],
     target: &FieldElement,
@@ -138,6 +140,7 @@ fn batch_add_8way_impl<B: SimdBackend>(
 
 // Generic 4-way vector addition
 #[inline(always)]
+#[allow(dead_code)]
 fn batch_vecadd_4way_impl<B: SimdBackend>(
     a: &[FieldElement; 4],
     b: &[FieldElement; 4],
@@ -161,6 +164,7 @@ fn batch_vecadd_4way_impl<B: SimdBackend>(
 
 // Generic 8-way vector addition
 #[inline(always)]
+#[allow(dead_code)]
 fn batch_vecadd_8way_impl<B: SimdBackend>(
     a: &[FieldElement; 8],
     b: &[FieldElement; 8],
@@ -182,6 +186,7 @@ fn batch_vecadd_8way_impl<B: SimdBackend>(
     results.map(|r| &r + &FieldElement::ZERO)
 }
 
+#[allow(dead_code)]
 impl FieldElement {
     #[inline(always)]
     pub(crate) fn batch_subtract_4way(batch: &[Self; 4], target: &Self) -> [Self; 4] {

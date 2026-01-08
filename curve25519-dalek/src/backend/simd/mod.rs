@@ -6,6 +6,7 @@
 use crate::field::FieldElement;
 
 /// Trait for SIMD-accelerated field element backends
+#[allow(dead_code)]
 pub trait SimdBackend: Sized {
     /// SIMD vector type (U64x4 for 64-bit batching 4 elements, U32x8 for 32-bit batching 8 elements)
     type Vector: Copy + core::ops::Add<Output = Self::Vector>

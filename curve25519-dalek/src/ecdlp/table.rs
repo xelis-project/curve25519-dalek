@@ -124,6 +124,7 @@ pub(crate) struct CuckooT1HashMapView<'a> {
     pub cuckoo_len: usize,
 }
 
+#[allow(dead_code)]
 impl CuckooT1HashMapView<'_> {
     pub(crate) fn lookup(
         &self,

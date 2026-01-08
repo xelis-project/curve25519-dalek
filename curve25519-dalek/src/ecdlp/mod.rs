@@ -1547,7 +1547,6 @@ mod tests {
     };
 
     use super::*;
-    use rand_core::{OsRng, RngCore};
     use rand::Rng;
 
     const L1: usize = 26;
@@ -1574,55 +1573,6 @@ mod tests {
 
         t
     }
-
-    // #[test]
-    // fn test_ecdlp_cofactors() {
-    //     let tables = read_or_gen_tables();
-    //     let view = tables.view();
-
-    //     for i in (0..(1u64 << 48)).step_by(1 << L1).take(1 << 12) {
-    //         let delta = rand::rng().random_range(0..(1 << L1));
-
-    //         let num = i + delta;
-    //         let point = RistrettoPoint::mul_base(&Scalar::from(num));
-
-    //         // take a random point from the coset4
-    //         let coset_i = rand::rng().random_range(0..4);
-    //         let point = point.coset4()[coset_i];
-    //         // let point = point.compress().decompress().unwrap();
-
-    //         let res = decode(
-    //             &view,
-    //             RistrettoPoint(point),
-    //             ECDLPArguments::new_with_range(0, 1 << 48),
-    //         );
-    //         assert_eq!(res, Some(num as i64));
-
-    //         println!("tested {num} (coset4[{coset_i}])");
-    //     }
-    // }
-
-    // #[test]
-    // fn test_ecdlp_single() {
-    //     let tables = read_or_gen_tables();
-    //     let view = tables.view();
-
-    //     for i in (0..(1u64 << 48)).step_by(1 << L1).take(1 << 12) {
-    //         let num = i; // rand::rng().random_range(0u64..(1 << 48));
-    //         let mut point = RistrettoPoint::mul_base(&Scalar::from(num));
-
-    //         if rand::rng().random_bool(0.5) {
-    //             // do a round of compression/decompression to mess up the Z and Ts
-    //             // & ecdlp will need to clear the cofactor
-    //             point = point.compress().decompress().unwrap();
-    //         }
-
-    //         let res = decode(&view, point, ECDLPArguments::new_with_range(0, 1 << 48));
-    //         assert_eq!(res, Some(num as i64));
-
-    //         println!("tested {num}");
-    //     }
-    // }
 
     #[test]
     fn test_ecdlp_par_decode() {
@@ -1976,7 +1926,6 @@ mod tests {
     }
     
 
-    use std::time::Instant;
     #[test]
     fn test_simd_lookup_correctness() {
         // Create a test table with known values
