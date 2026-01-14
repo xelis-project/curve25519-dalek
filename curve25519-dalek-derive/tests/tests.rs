@@ -99,23 +99,32 @@ mod inner_spec {
     }
 
     #[for_target_feature("sse2")]
-    const IS_AVX2: bool = false;
+    pub const IS_AVX2: bool = false;
 
     #[for_target_feature("avx2")]
-    const IS_AVX2: bool = true;
+    pub const IS_AVX2: bool = true;
 
+    #[for_target_feature("sse2")]
     #[test]
     fn test_specialized() {
         assert!(!IS_AVX2);
     }
 
-    #[cfg(test)]
-    mod tests {
-        #[test]
-        fn test_specialized_inner() {
-            assert!(!super::IS_AVX2);
-        }
+    #[for_target_feature("avx2")]
+    #[test]
+    fn test_specialized() {
+        assert!(IS_AVX2);
     }
+}
+
+#[test]
+fn test_specialized_inner_sse2() {
+    assert!(!inner_spec_sse2::IS_AVX2);
+}
+
+#[test]
+fn test_specialized_inner_avx2() {
+    assert!(inner_spec_avx2::IS_AVX2);
 }
 
 #[unsafe_target_feature("sse2")]

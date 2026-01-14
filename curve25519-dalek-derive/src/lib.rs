@@ -402,7 +402,21 @@ fn process_function(
             }
             syn::Meta::Path(path) if is_path_eq(path, "test") => {
                 maybe_outer_attributes.push(attribute);
-                maybe_cfg = quote::quote! { #[cfg(target_feature = #attributes)] };
+                // Split comma-separated features and generate proper cfg
+                let attr_value = attributes.value();
+                let features: Vec<_> = attr_value
+                    .split(',')
+                    .map(|f| f.trim().to_string())
+                    .collect();
+                if features.len() == 1 {
+                    let feature = &features[0];
+                    maybe_cfg = quote::quote! { #[cfg(target_feature = #feature)] };
+                } else {
+                    let feature_cfgs = features.iter().map(|f| {
+                        quote::quote! { target_feature = #f }
+                    });
+                    maybe_cfg = quote::quote! { #[cfg(all(#(#feature_cfgs),*))] };
+                }
             }
             syn::Meta::List(syn::MetaList { path, tokens, .. })
                 if is_path_eq(path, "inline") && tokens.to_string() == "always" =>

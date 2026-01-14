@@ -88,4 +88,5 @@ check-cfg = [
     'cfg(curve25519_dalek_diagnostics, values("build"))',
     'cfg(curve25519_dalek_bits, values("32", "64"))',
     'cfg(nightly)',
+    'cfg(target_feature, values("avx512ifma,avx512vl"))',
 ]

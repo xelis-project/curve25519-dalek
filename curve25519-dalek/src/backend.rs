@@ -46,14 +46,14 @@ pub mod vector;
 enum BackendKind {
     #[cfg(curve25519_dalek_backend = "simd")]
     Avx2,
-    #[cfg(curve25519_dalek_backend = "avx512")]
+    #[cfg(all(curve25519_dalek_backend = "avx512", target_feature = "avx512ifma", target_feature = "avx512vl"))]
     Avx512,
     Serial,
 }
 
 #[inline]
 fn get_selected_backend() -> BackendKind {
-    #[cfg(curve25519_dalek_backend = "avx512")]
+    #[cfg(all(curve25519_dalek_backend = "avx512", target_feature = "avx512ifma", target_feature = "avx512vl"))]
     {
         cpufeatures::new!(cpuid_avx512, "avx512ifma", "avx512vl");
         let token_avx512: cpuid_avx512::InitToken = cpuid_avx512::init();
@@ -88,7 +88,7 @@ where
         #[cfg(curve25519_dalek_backend = "simd")]
         BackendKind::Avx2 =>
             vector::scalar_mul::pippenger::spec_avx2::Pippenger::optional_multiscalar_mul::<I, J>(scalars, points),
-        #[cfg(curve25519_dalek_backend = "avx512")]
+        #[cfg(all(curve25519_dalek_backend = "avx512", target_feature = "avx512ifma", target_feature = "avx512vl"))]
         BackendKind::Avx512 =>
             vector::scalar_mul::pippenger::spec_avx512ifma_avx512vl::Pippenger::optional_multiscalar_mul::<I, J>(scalars, points),
         BackendKind::Serial =>
@@ -100,7 +100,7 @@ where
 pub(crate) enum VartimePrecomputedStraus {
     #[cfg(curve25519_dalek_backend = "simd")]
     Avx2(vector::scalar_mul::precomputed_straus::spec_avx2::VartimePrecomputedStraus),
-    #[cfg(curve25519_dalek_backend = "avx512")]
+    #[cfg(all(curve25519_dalek_backend = "avx512", target_feature = "avx512ifma", target_feature = "avx512vl"))]
     Avx512ifma(
         vector::scalar_mul::precomputed_straus::spec_avx512ifma_avx512vl::VartimePrecomputedStraus,
     ),
@@ -120,7 +120,7 @@ impl VartimePrecomputedStraus {
             #[cfg(curve25519_dalek_backend = "simd")]
             BackendKind::Avx2 =>
                 VartimePrecomputedStraus::Avx2(vector::scalar_mul::precomputed_straus::spec_avx2::VartimePrecomputedStraus::new(static_points)),
-            #[cfg(curve25519_dalek_backend = "avx512")]
+            #[cfg(all(curve25519_dalek_backend = "avx512", target_feature = "avx512ifma", target_feature = "avx512vl"))]
             BackendKind::Avx512 =>
                 VartimePrecomputedStraus::Avx512ifma(vector::scalar_mul::precomputed_straus::spec_avx512ifma_avx512vl::VartimePrecomputedStraus::new(static_points)),
             BackendKind::Serial =>
@@ -135,7 +135,7 @@ impl VartimePrecomputedStraus {
         match self {
             #[cfg(curve25519_dalek_backend = "simd")]
             VartimePrecomputedStraus::Avx2(inner) => inner.len(),
-            #[cfg(curve25519_dalek_backend = "avx512")]
+            #[cfg(all(curve25519_dalek_backend = "avx512", target_feature = "avx512ifma", target_feature = "avx512vl"))]
             VartimePrecomputedStraus::Avx512ifma(inner) => inner.len(),
             VartimePrecomputedStraus::Scalar(inner) => inner.len(),
         }
@@ -148,7 +148,7 @@ impl VartimePrecomputedStraus {
         match self {
             #[cfg(curve25519_dalek_backend = "simd")]
             VartimePrecomputedStraus::Avx2(inner) => inner.is_empty(),
-            #[cfg(curve25519_dalek_backend = "avx512")]
+            #[cfg(all(curve25519_dalek_backend = "avx512", target_feature = "avx512ifma", target_feature = "avx512vl"))]
             VartimePrecomputedStraus::Avx512ifma(inner) => inner.is_empty(),
             VartimePrecomputedStraus::Scalar(inner) => inner.is_empty(),
         }
@@ -176,7 +176,7 @@ impl VartimePrecomputedStraus {
                 dynamic_scalars,
                 dynamic_points,
             ),
-            #[cfg(curve25519_dalek_backend = "avx512")]
+            #[cfg(all(curve25519_dalek_backend = "avx512", target_feature = "avx512ifma", target_feature = "avx512vl"))]
             VartimePrecomputedStraus::Avx512ifma(inner) => inner.optional_mixed_multiscalar_mul(
                 static_scalars,
                 dynamic_scalars,
@@ -207,7 +207,7 @@ where
         BackendKind::Avx2 => {
             vector::scalar_mul::straus::spec_avx2::Straus::multiscalar_mul::<I, J>(scalars, points)
         }
-        #[cfg(curve25519_dalek_backend = "avx512")]
+        #[cfg(all(curve25519_dalek_backend = "avx512", target_feature = "avx512ifma", target_feature = "avx512vl"))]
         BackendKind::Avx512 => {
             vector::scalar_mul::straus::spec_avx512ifma_avx512vl::Straus::multiscalar_mul::<I, J>(
                 scalars, points,
@@ -236,7 +236,7 @@ where
                 scalars, points,
             )
         }
-        #[cfg(curve25519_dalek_backend = "avx512")]
+        #[cfg(all(curve25519_dalek_backend = "avx512", target_feature = "avx512ifma", target_feature = "avx512vl"))]
         BackendKind::Avx512 => {
             vector::scalar_mul::straus::spec_avx512ifma_avx512vl::Straus::optional_multiscalar_mul::<
                 I,
@@ -254,7 +254,7 @@ pub fn variable_base_mul(point: &EdwardsPoint, scalar: &Scalar) -> EdwardsPoint 
     match get_selected_backend() {
         #[cfg(curve25519_dalek_backend = "simd")]
         BackendKind::Avx2 => vector::scalar_mul::variable_base::spec_avx2::mul(point, scalar),
-        #[cfg(curve25519_dalek_backend = "avx512")]
+        #[cfg(all(curve25519_dalek_backend = "avx512", target_feature = "avx512ifma", target_feature = "avx512vl"))]
         BackendKind::Avx512 => {
             vector::scalar_mul::variable_base::spec_avx512ifma_avx512vl::mul(point, scalar)
         }
@@ -268,7 +268,7 @@ pub fn vartime_double_base_mul(a: &Scalar, A: &EdwardsPoint, b: &Scalar) -> Edwa
     match get_selected_backend() {
         #[cfg(curve25519_dalek_backend = "simd")]
         BackendKind::Avx2 => vector::scalar_mul::vartime_double_base::spec_avx2::mul(a, A, b),
-        #[cfg(curve25519_dalek_backend = "avx512")]
+        #[cfg(all(curve25519_dalek_backend = "avx512", target_feature = "avx512ifma", target_feature = "avx512vl"))]
         BackendKind::Avx512 => {
             vector::scalar_mul::vartime_double_base::spec_avx512ifma_avx512vl::mul(a, A, b)
         }
