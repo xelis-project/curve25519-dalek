@@ -680,12 +680,17 @@ mod tests {
     };
 
     use super::*;
-    use rand::{Rng, rng};
+    use getrandom::SysRng;
+    use rand_core::{Rng, UnwrapErr};
 
     const L1: usize = 26;
 
     // Necessary for one ECDLP tables allocation only
     static TABLES: Mutex<Option<Arc<ECDLPTables>>> = Mutex::new(None);
+
+    fn random_u64_below_power_of_two(rng: &mut impl Rng, bits: u32) -> u64 {
+        rng.next_u64() & ((1u64 << bits) - 1)
+    }
 
     fn read_or_gen_tables() -> Arc<ECDLPTables> {
         let mut tables = TABLES.lock().expect("acquire tables lock");
@@ -712,14 +717,15 @@ mod tests {
         let tables = read_or_gen_tables();
         let view = tables.view();
 
+        let mut rng = UnwrapErr(SysRng);
         for i in (0..(1u64 << 48)).step_by(1 << L1).take(1 << 12) {
-            let delta = rng().random_range(0..(1 << L1));
+            let delta = random_u64_below_power_of_two(&mut rng, L1 as u32);
 
             let num = i + delta;
             let point = RistrettoPoint::mul_base(&Scalar::from(num));
 
             // take a random point from the coset4
-            let coset_i = rng().random_range(0..4);
+            let coset_i = (rng.next_u32() as usize) & 3;
             let point = point.coset4()[coset_i];
 
             let res = decode(
@@ -736,11 +742,12 @@ mod tests {
         let tables = read_or_gen_tables();
         let view = tables.view();
 
+        let mut rng = UnwrapErr(SysRng);
         for i in (0..(1u64 << 48)).step_by(1 << L1).take(1 << 12) {
-            let num = i; // rand::thread_rng().gen_range(0u64..(1 << 48));
+            let num = i;
             let mut point = RistrettoPoint::mul_base(&Scalar::from(num));
 
-            if rng().random() {
+            if rng.next_u32() & 1 != 0 {
                 // do a round of compression/decompression to mess up the Z and Ts
                 // & ecdlp will need to clear the cofactor
                 point = point.compress().decompress().unwrap();
