@@ -220,9 +220,7 @@ fn find_validation_criteria() {
     }
 
     println!("VERIFY_ALLOWED_EDGECASES: {verify_allowed_edgecases:?}");
-    println!(
-        "VERIFY_STRICT_ALLOWED_EDGECASES: {verify_strict_allowed_edgecases:?}"
-    );
+    println!("VERIFY_STRICT_ALLOWED_EDGECASES: {verify_strict_allowed_edgecases:?}");
     println!(
         "re-encoded k && low-order A yielded a valid signature {num_lucky_reencoded_k}/{num_reencoded_k} of the time"
     );
